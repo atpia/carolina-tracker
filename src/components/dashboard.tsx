@@ -1,8 +1,9 @@
-import { Baby, Check, Droplet, Milk, Pill, Plus, Square } from "lucide-react"
+import { Baby, CircleStop, Milk, Pencil, Plus } from "lucide-react"
 import { toast } from "sonner"
 
 import type { Draft } from "@/components/entry-sheet"
 import { eventDetails, eventTitle } from "@/components/describe"
+import { kindIcon, TYPE_ICONS } from "@/components/icons"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -91,10 +92,10 @@ function ActiveFeed({
             }
           }}
         >
-          <Square className="fill-current" /> Stop
+          <CircleStop /> Stop
         </Button>
         <Button size="lg" variant="outline" onClick={() => onOpen({ ...event, edit: true })}>
-          Edit
+          <Pencil /> Edit
         </Button>
       </CardContent>
     </Card>
@@ -139,7 +140,7 @@ function FeedingCard({
     <Card>
       <CardHeader>
         <CardDescription className="flex items-center gap-1.5">
-          <Baby className="text-feed size-4" /> Feeding
+          <TYPE_ICONS.feeding className="text-feed size-4" /> Feeding
         </CardDescription>
         <CardTitle className={cn("text-2xl", tone)}>{headline}</CardTitle>
         {sub && <p className="text-muted-foreground text-sm">{sub}</p>}
@@ -167,7 +168,9 @@ function FeedingCard({
           <Button
             size="lg"
             variant="secondary"
-            onClick={() => onOpen({ type: "feeding", kind: lastFeed && isBottle(lastFeed.kind) ? lastFeed.kind : "formula" })}
+            onClick={() =>
+              onOpen({ type: "feeding", kind: lastFeed && isBottle(lastFeed.kind) ? lastFeed.kind : "formula" })
+            }
           >
             <Milk /> Bottle
           </Button>
@@ -189,6 +192,13 @@ function lastSideSuggestion(last?: LogEvent) {
   return "left"
 }
 
+const DIAPER_BUTTONS: { kind: DiaperKind; label: string; toast: string }[] = [
+  { kind: "wet", label: "Wet", toast: "Wet diaper logged" },
+  { kind: "stool", label: "Stool", toast: "Stool diaper logged" },
+  { kind: "both", label: "Both", toast: "Wet + stool logged" },
+  { kind: "dry", label: "Clean", toast: "Check logged, diaper was clean" },
+]
+
 function DiaperCard({
   status,
   now,
@@ -202,7 +212,11 @@ function DiaperCard({
 }) {
   const { lastChange, lastCheck, nextCheck } = status
   const due = nextCheck !== undefined && now >= nextCheck
-  const headline = !nextCheck ? "No diaper checks yet" : due ? "Time to check her diaper" : `Next check ${relative(nextCheck, now)}`
+  const headline = !nextCheck
+    ? "No diaper checks yet"
+    : due
+      ? "Time to check her diaper"
+      : `Next check ${relative(nextCheck, now)}`
 
   const log = (kind: DiaperKind, label: string) => quickLog({ type: "diaper", kind }, label)
 
@@ -210,7 +224,7 @@ function DiaperCard({
     <Card>
       <CardHeader>
         <CardDescription className="flex items-center gap-1.5">
-          <Droplet className="text-diaper size-4" /> Diaper
+          <TYPE_ICONS.diaper className="text-diaper size-4" /> Diaper
         </CardDescription>
         <CardTitle className={cn("text-2xl", due && "text-diaper")}>{headline}</CardTitle>
         {lastCheck && (
@@ -219,7 +233,12 @@ function DiaperCard({
           </p>
         )}
         <CardAction>
-          <Button size="icon" variant="ghost" aria-label="Log a diaper with details" onClick={() => onOpen({ type: "diaper" })}>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Log a diaper with details"
+            onClick={() => onOpen({ type: "diaper" })}
+          >
             <Plus />
           </Button>
         </CardAction>
@@ -230,23 +249,24 @@ function DiaperCard({
             className="hover:bg-muted -mx-2 rounded-md px-2 py-1 text-left text-sm"
             onClick={() => onOpen({ ...lastChange, edit: true })}
           >
-            <span className="font-medium">Last change: {eventTitle(lastChange)}</span> at {formatClock(lastChange.start)} (
-            {relative(t(lastChange.start), now)})
+            <span className="font-medium">Last change: {eventTitle(lastChange)}</span> at{" "}
+            {formatClock(lastChange.start)} ({relative(t(lastChange.start), now)})
           </button>
         )}
         <div className="grid grid-cols-2 gap-2">
-          <Button size="lg" variant="secondary" onClick={() => log("wet", "Wet diaper logged")}>
-            <Droplet /> Wet
-          </Button>
-          <Button size="lg" variant="secondary" onClick={() => log("stool", "Stool diaper logged")}>
-            Stool
-          </Button>
-          <Button size="lg" variant="secondary" onClick={() => log("both", "Wet + stool logged")}>
-            Both
-          </Button>
-          <Button size="lg" variant="outline" onClick={() => log("dry", "Check logged, diaper was clean")}>
-            <Check /> Clean
-          </Button>
+          {DIAPER_BUTTONS.map(({ kind, label, toast }) => {
+            const Icon = kindIcon("diaper", kind)
+            return (
+              <Button
+                key={kind}
+                size="lg"
+                variant={kind === "dry" ? "outline" : "secondary"}
+                onClick={() => log(kind, toast)}
+              >
+                <Icon /> {label}
+              </Button>
+            )
+          })}
         </div>
       </CardContent>
     </Card>
@@ -268,12 +288,14 @@ function MedCard({
   const other: MedKind = nextMedKind === "ibuprofen" ? "tylenol" : "ibuprofen"
   const ready = nextMedAt === undefined || now >= nextMedAt
   const remaining = nextMedAt ? nextMedAt - now : 0
+  const NextIcon = kindIcon("med", nextMedKind)
+  const OtherIcon = kindIcon("med", other)
 
   return (
     <Card>
       <CardHeader>
         <CardDescription className="flex items-center gap-1.5">
-          <Pill className="text-med size-4" /> Mom's medication
+          <TYPE_ICONS.med className="text-med size-4" /> Mom's medication
         </CardDescription>
         <CardTitle className="text-2xl">
           Next: <span className="text-med">{MED_LABELS[nextMedKind]}</span>
@@ -286,7 +308,12 @@ function MedCard({
               : `At ${formatClock(nextMedAt)}`}
         </p>
         <CardAction>
-          <Button size="icon" variant="ghost" aria-label="Log a dose at another time" onClick={() => onOpen({ type: "med", kind: nextMedKind })}>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Log a dose at another time"
+            onClick={() => onOpen({ type: "med", kind: nextMedKind })}
+          >
             <Plus />
           </Button>
         </CardAction>
@@ -297,8 +324,12 @@ function MedCard({
           <MedLast label="Ibuprofen" event={lastIbuprofen} now={now} onOpen={onOpen} />
           <MedLast label="Tylenol" event={lastTylenol} now={now} onOpen={onOpen} />
         </div>
-        <Button size="lg" variant={ready ? "default" : "secondary"} onClick={() => quickLog({ type: "med", kind: nextMedKind }, `${MED_LABELS[nextMedKind]} logged`)}>
-          <Pill /> Took {MED_LABELS[nextMedKind]} now
+        <Button
+          size="lg"
+          variant={ready ? "default" : "secondary"}
+          onClick={() => quickLog({ type: "med", kind: nextMedKind }, `${MED_LABELS[nextMedKind]} logged`)}
+        >
+          <NextIcon /> Took {MED_LABELS[nextMedKind]} now
         </Button>
         <Button
           variant="ghost"
@@ -306,7 +337,7 @@ function MedCard({
           className="text-muted-foreground"
           onClick={() => quickLog({ type: "med", kind: other }, `${MED_LABELS[other]} logged`)}
         >
-          Took {MED_LABELS[other]} instead
+          <OtherIcon /> Took {MED_LABELS[other]} instead
         </Button>
       </CardContent>
     </Card>

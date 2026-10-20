@@ -1,10 +1,12 @@
 import { useState } from "react"
-import { Baby } from "lucide-react"
+import { Baby, CircleAlert, FlaskConical, Link } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import { createBackend, type Connection } from "@/lib/api"
 
 /** Accepts a full personal setup link pasted into the first field. */
@@ -17,7 +19,13 @@ function parseSetupLink(text: string): Connection | null {
   return api && code ? { api, code } : null
 }
 
-export function SetupScreen({ initial, onConnect }: { initial?: Partial<Connection>; onConnect: (c: Connection) => void }) {
+export function SetupScreen({
+  initial,
+  onConnect,
+}: {
+  initial?: Partial<Connection>
+  onConnect: (c: Connection) => void
+}) {
   const [api, setApi] = useState(initial?.api ?? "")
   const [code, setCode] = useState(initial?.code ?? "")
   const [error, setError] = useState("")
@@ -31,7 +39,11 @@ export function SetupScreen({ initial, onConnect }: { initial?: Partial<Connecti
       await createBackend(conn).session()
       onConnect(conn)
     } catch (e) {
-      setError((e as Error).message === "Failed to fetch" ? "Couldn't reach the tracker. Check the link." : (e as Error).message)
+      setError(
+        (e as Error).message === "Failed to fetch"
+          ? "Couldn't reach the tracker. Check the link."
+          : (e as Error).message,
+      )
     } finally {
       setBusy(false)
     }
@@ -44,37 +56,53 @@ export function SetupScreen({ initial, onConnect }: { initial?: Partial<Connecti
           <Baby className="size-7" />
         </span>
         <h1 className="text-2xl font-semibold">Baby tracker</h1>
-        <p className="text-muted-foreground text-sm">Feedings, diapers and mom's medication, shared between caregivers.</p>
+        <p className="text-muted-foreground text-sm">
+          Feedings, diapers and mom's medication, shared between caregivers.
+        </p>
       </div>
       <Card>
         <CardHeader>
           <CardTitle>Connect this phone</CardTitle>
           <CardDescription>
-            Paste the personal setup link you were sent. You can also paste the tracker link and type your code separately.
+            Paste the personal setup link you were sent. You can also paste the tracker link and type your code
+            separately.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form
-            className="grid gap-4"
+            className="grid gap-5"
             onSubmit={(e) => {
               e.preventDefault()
               connect()
             }}
           >
-            <div className="grid gap-1.5">
-              <Label htmlFor="api">Setup link</Label>
-              <Input id="api" value={api} onChange={(e) => setApi(e.target.value)} placeholder="https://atpia.github.io/carolina-tracker/#api=…" />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="code">Personal code (not needed with a setup link)</Label>
-              <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" />
-            </div>
-            {error && <p className="text-destructive text-sm">{error}</p>}
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="api">Setup link</FieldLabel>
+                <Input
+                  id="api"
+                  value={api}
+                  onChange={(e) => setApi(e.target.value)}
+                  placeholder="https://atpia.github.io/carolina-tracker/#api=…"
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="code">Personal code (not needed with a setup link)</FieldLabel>
+                <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" />
+              </Field>
+            </FieldGroup>
+            {error && (
+              <Alert variant="destructive">
+                <CircleAlert />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <Button size="lg" type="submit" disabled={busy || !api || (!code && !parseSetupLink(api))}>
-              {busy ? "Connecting…" : "Connect"}
+              {busy ? <Spinner /> : <Link />}
+              {busy ? "Connecting" : "Connect"}
             </Button>
             <Button type="button" variant="ghost" onClick={() => onConnect({ api: "demo", code: "demo" })}>
-              Try it first with demo data on this phone
+              <FlaskConical /> Try it first with demo data
             </Button>
           </form>
         </CardContent>

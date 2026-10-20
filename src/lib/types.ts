@@ -20,6 +20,7 @@ export interface LogEvent {
   by: string
   createdAt?: string
   updatedAt?: string
+  updatedBy?: string
 }
 
 export interface Settings {

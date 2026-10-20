@@ -1,9 +1,21 @@
-import { useState } from "react"
-import { LogOut } from "lucide-react"
+import { LogOut, Monitor, Moon, Sun } from "lucide-react"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
+import { Field, FieldDescription, FieldGroup, FieldTitle } from "@/components/ui/field"
+import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { Settings } from "@/lib/types"
 import type { Unit } from "@/lib/units"
@@ -31,40 +43,67 @@ export function SettingsView({
   onTheme: (t: Theme) => void
   onSignOut: () => void
 }) {
-  const [confirmSignOut, setConfirmSignOut] = useState(false)
-
   return (
     <div className="grid gap-4">
       <Card>
         <CardHeader>
           <CardTitle>This phone</CardTitle>
           <CardDescription>
-            {demo ? "Demo mode. Entries stay on this phone only." : `Signed in as ${user}. Entries you add are labeled with your name.`}
+            {demo
+              ? "Demo mode. Entries stay on this phone only."
+              : `Signed in as ${user}. Entries you add are labeled with your name.`}
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid gap-2">
-            <Label>Bottle units</Label>
-            <ToggleGroup type="single" value={unit} onValueChange={(v) => v && onUnit(v as Unit)}>
-              <ToggleGroupItem value="ml">ml</ToggleGroupItem>
-              <ToggleGroupItem value="oz">oz</ToggleGroupItem>
-            </ToggleGroup>
-            <p className="text-muted-foreground text-xs">Amounts are always saved in ml, so switching never changes past entries.</p>
-          </div>
-          <div className="grid gap-2">
-            <Label>Appearance</Label>
-            <ToggleGroup type="single" value={theme} onValueChange={(v) => v && onTheme(v as Theme)}>
-              <ToggleGroupItem value="system">Auto</ToggleGroupItem>
-              <ToggleGroupItem value="light">Light</ToggleGroupItem>
-              <ToggleGroupItem value="dark">Dark</ToggleGroupItem>
-            </ToggleGroup>
-          </div>
-          <Button
-            variant={confirmSignOut ? "destructive" : "outline"}
-            onClick={() => (confirmSignOut ? onSignOut() : setConfirmSignOut(true))}
-          >
-            <LogOut /> {confirmSignOut ? "Tap again to sign out" : demo ? "Leave demo" : "Sign out"}
-          </Button>
+        <CardContent>
+          <FieldGroup>
+            <Field>
+              <FieldTitle>Bottle units</FieldTitle>
+              <ToggleGroup type="single" value={unit} onValueChange={(v) => v && onUnit(v as Unit)}>
+                <ToggleGroupItem value="ml">ml</ToggleGroupItem>
+                <ToggleGroupItem value="oz">oz</ToggleGroupItem>
+              </ToggleGroup>
+              <FieldDescription>
+                Amounts are always saved in ml, so switching never changes past entries.
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldTitle>Appearance</FieldTitle>
+              <ToggleGroup type="single" value={theme} onValueChange={(v) => v && onTheme(v as Theme)}>
+                <ToggleGroupItem value="system">
+                  <Monitor /> Auto
+                </ToggleGroupItem>
+                <ToggleGroupItem value="light">
+                  <Sun /> Light
+                </ToggleGroupItem>
+                <ToggleGroupItem value="dark">
+                  <Moon /> Dark
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </Field>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline">
+                  <LogOut /> {demo ? "Leave demo" : "Sign out"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{demo ? "Leave the demo?" : "Sign out on this phone?"}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {demo
+                      ? "You'll go back to the connect screen. Demo entries stay on this phone."
+                      : "Nothing is deleted. You'll need your personal setup link to sign back in."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Stay signed in</AlertDialogCancel>
+                  <AlertDialogAction variant="destructive" onClick={onSignOut}>
+                    {demo ? "Leave demo" : "Sign out"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </FieldGroup>
         </CardContent>
       </Card>
 
@@ -75,18 +114,40 @@ export function SettingsView({
         </CardHeader>
         <CardContent className="grid gap-1 text-sm">
           <Row label="Feeding window" value={`${settings.feedMinH} to ${settings.feedMaxH} hours`} />
+          <Separator />
           <Row label="Medication every" value={`${settings.medIntervalH} hours, alternating`} />
+          <Separator />
           <Row label="Diaper check every" value={`${settings.diaperCheckH} hours`} />
-          {users.length > 0 && <Row label="Caregivers" value={users.join(", ")} />}
         </CardContent>
       </Card>
+
+      {users.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Caregivers</CardTitle>
+            <CardDescription>Add or remove people in the Users tab of the Google Sheet.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-3">
+            {users.map((name) => (
+              <div key={name} className="flex items-center gap-2 text-sm">
+                <Avatar className="size-7">
+                  <AvatarFallback className="text-[0.65rem] font-medium">
+                    {name.slice(0, 1).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                {name}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-4 py-1">
+    <div className="flex justify-between gap-4 py-1.5">
       <span className="text-muted-foreground">{label}</span>
       <span className="text-right font-medium">{value}</span>
     </div>

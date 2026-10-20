@@ -1,27 +1,18 @@
-import { Baby, Droplet, Milk, Pill } from "lucide-react"
-
+import { kindIcon } from "@/components/icons"
+import type { LogEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { isBottle, type LogEvent } from "@/lib/types"
+
+const TONES = {
+  feeding: "bg-feed/15 text-feed",
+  diaper: "bg-diaper/15 text-diaper",
+  med: "bg-med/15 text-med",
+}
 
 export function EventIcon({ event, className }: { event: Pick<LogEvent, "type" | "kind">; className?: string }) {
-  const base = "flex size-9 shrink-0 items-center justify-center rounded-full [&_svg]:size-4.5"
-  if (event.type === "feeding") {
-    return (
-      <span className={cn(base, "bg-feed/15 text-feed", className)}>
-        {isBottle(event.kind) ? <Milk /> : <Baby />}
-      </span>
-    )
-  }
-  if (event.type === "diaper") {
-    return (
-      <span className={cn(base, "bg-diaper/15 text-diaper", className)}>
-        <Droplet />
-      </span>
-    )
-  }
+  const Icon = kindIcon(event.type, event.kind)
   return (
-    <span className={cn(base, "bg-med/15 text-med", className)}>
-      <Pill />
+    <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full", TONES[event.type], className)}>
+      <Icon className="size-4.5" />
     </span>
   )
 }

@@ -78,7 +78,13 @@ function sampleEvents(): LogEvent[] {
   const H = 3_600_000
   const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * H).toISOString()
   const e = (id: string, type: LogEvent["type"], kind: string, h: number, extra: Partial<LogEvent> = {}): LogEvent => ({
-    id, type, kind, start: at(h), by: "Demo", createdAt: at(h), ...extra,
+    id,
+    type,
+    kind,
+    start: at(h),
+    by: "Demo",
+    createdAt: at(h),
+    ...extra,
   })
   return [
     e("s1", "feeding", "left", 2.3, { end: at(2.0), confidence: 4 }),

@@ -1,24 +1,46 @@
 import { useEffect, useState } from "react"
-import { Baby, Droplet, Milk, Pill, Timer, Trash2 } from "lucide-react"
+import { Annoyed, Frown, Laugh, Meh, Smile, Timer, Trash2, type LucideIcon } from "lucide-react"
 
 import { DateTimeField } from "@/components/datetime-field"
 import { confidenceLabel } from "@/components/describe"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { kindIcon, TYPE_ICONS } from "@/components/icons"
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer"
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldTitle } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { Slider } from "@/components/ui/slider"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { consumedMl } from "@/lib/derive"
 import { newId } from "@/lib/api"
-import { isBottle, type EventType, type LogEvent } from "@/lib/types"
+import {
+  DIAPER_LABELS,
+  isBottle,
+  MED_LABELS,
+  type DiaperKind,
+  type EventType,
+  type LogEvent,
+  type MedKind,
+} from "@/lib/types"
 import { formatAmount, fromDisplay, toDisplay, type Unit } from "@/lib/units"
 
 /** A new entry's starting values, or an existing entry with `edit: true`. */
@@ -38,15 +60,26 @@ function blank(draft: Partial<LogEvent> & { type: EventType }, user: string): Lo
 }
 
 const TITLES: Record<EventType, string> = {
-  feeding: "Feeding",
-  diaper: "Diaper",
-  med: "Mom's medication",
+  feeding: "feeding",
+  diaper: "diaper",
+  med: "mom's medication",
 }
+
+const CONFIDENCE_ICONS: LucideIcon[] = [Frown, Annoyed, Meh, Smile, Laugh]
 
 function parseNum(value: string) {
   if (value.trim() === "") return undefined
   const n = Number(value)
   return Number.isFinite(n) ? n : undefined
+}
+
+function KindOption({ type, kind, label }: { type: EventType; kind: string; label: string }) {
+  const Icon = kindIcon(type, kind)
+  return (
+    <ToggleGroupItem value={kind}>
+      <Icon /> {label}
+    </ToggleGroupItem>
+  )
 }
 
 export function EntrySheet({
@@ -67,7 +100,6 @@ export function EntrySheet({
   const [event, setEvent] = useState<LogEvent | null>(null)
   const [bottleMode, setBottleMode] = useState<"left" | "percent">("left")
   const [saving, setSaving] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const editing = Boolean(draft?.edit)
 
   useEffect(() => {
@@ -75,7 +107,6 @@ export function EntrySheet({
     const { edit, ...rest } = draft
     const e = edit ? (rest as LogEvent) : blank(rest, user)
     setEvent(e)
-    setConfirmDelete(false)
     setBottleMode(e.percent !== undefined && e.amountEndMl === undefined ? "percent" : "left")
   }, [draft, user])
 
@@ -99,7 +130,7 @@ export function EntrySheet({
       await onSave(out)
       onClose()
     } catch {
-      // The tracker hook already showed a toast; keep the sheet open so nothing is lost.
+      // The tracker hook already showed a toast; keep the drawer open so nothing is lost.
     } finally {
       setSaving(false)
     }
@@ -107,193 +138,233 @@ export function EntrySheet({
 
   const open = Boolean(draft && event)
   const bottle = event?.type === "feeding" && isBottle(event.kind)
-  const drank = event && bottle ? consumedMl({ ...event, ...(bottleMode === "left" ? { percent: undefined } : { amountEndMl: undefined }) }) : undefined
+  const drank =
+    event && bottle
+      ? consumedMl({ ...event, ...(bottleMode === "left" ? { percent: undefined } : { amountEndMl: undefined }) })
+      : undefined
+  const TypeIcon = event ? TYPE_ICONS[event.type] : null
 
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="bottom" className="overflow-y-auto">
-        {event && (
+    <Drawer open={open} onOpenChange={(o) => !o && onClose()} repositionInputs={false}>
+      <DrawerContent>
+        {event && TypeIcon && (
           <>
-            <SheetHeader>
-              <SheetTitle>
-                {editing ? "Edit" : "Log"} {TITLES[event.type].toLowerCase()}
-              </SheetTitle>
-              <SheetDescription>
-                {editing ? `Logged by ${event.by}` : "Times default to now. Change them to log something earlier."}
-              </SheetDescription>
-            </SheetHeader>
+            <DrawerHeader className="text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
+              <DrawerTitle className="flex items-center gap-2">
+                <TypeIcon className="size-5" />
+                {editing ? "Edit" : "Log"} {TITLES[event.type]}
+              </DrawerTitle>
+              <DrawerDescription>
+                {editing
+                  ? `Logged by ${event.by}${event.updatedBy && event.updatedBy !== event.by ? `, last edited by ${event.updatedBy}` : ""}`
+                  : "Times default to now. Change them to log something earlier."}
+              </DrawerDescription>
+            </DrawerHeader>
 
             <form
-              className="grid grid-cols-1 gap-5 px-4"
+              className="overflow-y-auto px-4"
               onSubmit={(e) => {
                 e.preventDefault()
                 submit()
               }}
             >
-              {event.type === "feeding" && (
-                <>
-                  <div className="grid gap-2">
-                    <Label>Breast</Label>
-                    <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>
-                      <ToggleGroupItem value="left">
-                        <Baby /> Left
-                      </ToggleGroupItem>
-                      <ToggleGroupItem value="right">
-                        <Baby /> Right
-                      </ToggleGroupItem>
-                      <ToggleGroupItem value="both">Both</ToggleGroupItem>
-                    </ToggleGroup>
-                    <Label className="mt-1">Bottle</Label>
-                    <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>
-                      <ToggleGroupItem value="formula">
-                        <Milk /> Formula
-                      </ToggleGroupItem>
-                      <ToggleGroupItem value="expressed">
-                        <Milk /> Expressed
-                      </ToggleGroupItem>
-                    </ToggleGroup>
-                  </div>
+              <FieldGroup>
+                {event.type === "feeding" && (
+                  <>
+                    <Field>
+                      <FieldTitle>Breast</FieldTitle>
+                      <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>
+                        <KindOption type="feeding" kind="left" label="Left" />
+                        <KindOption type="feeding" kind="right" label="Right" />
+                        <KindOption type="feeding" kind="both" label="Both" />
+                      </ToggleGroup>
+                      <FieldTitle className="mt-1">Bottle</FieldTitle>
+                      <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>
+                        <KindOption type="feeding" kind="formula" label="Formula" />
+                        <KindOption type="feeding" kind="expressed" label="Expressed" />
+                      </ToggleGroup>
+                    </Field>
 
-                  <DateTimeField id="start" label="Started" value={event.start} onChange={(v) => v && set({ start: v })} />
-                  <DateTimeField
-                    id="end"
-                    label="Finished"
-                    value={event.end ?? ""}
-                    onChange={(v) => set({ end: v || undefined })}
-                    clearable
-                  />
-                  {!event.end && (
-                    <p className="text-muted-foreground -mt-3 text-sm">
-                      No finish time means the feeding is still going. You can stop it from the home screen.
-                    </p>
-                  )}
+                    <DateTimeField
+                      id="start"
+                      label="Started"
+                      value={event.start}
+                      onChange={(v) => v && set({ start: v })}
+                    />
+                    <DateTimeField
+                      id="end"
+                      label="Finished"
+                      value={event.end ?? ""}
+                      onChange={(v) => set({ end: v || undefined })}
+                      clearable
+                      description={
+                        !event.end
+                          ? "No finish time means the feeding is still going. You can stop it from the home screen."
+                          : undefined
+                      }
+                    />
 
-                  {bottle ? (
-                    <div className="grid gap-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="grid gap-1.5">
-                          <Label htmlFor="amt-start">Offered ({unit})</Label>
-                          <Input
-                            id="amt-start"
-                            inputMode="decimal"
-                            value={toDisplay(event.amountStartMl, unit) ?? ""}
-                            onChange={(e) => set({ amountStartMl: fromDisplay(parseNum(e.target.value), unit) })}
-                            placeholder={unit === "ml" ? "60" : "2"}
-                          />
-                        </div>
-                        <div className="grid gap-1.5">
-                          <Label htmlFor="amt-end">{bottleMode === "left" ? `Left over (${unit})` : "Drank (%)"}</Label>
-                          {bottleMode === "left" ? (
+                    {bottle ? (
+                      <Field>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field>
+                            <FieldLabel htmlFor="amt-start">Offered ({unit})</FieldLabel>
                             <Input
-                              id="amt-end"
+                              id="amt-start"
                               inputMode="decimal"
-                              value={toDisplay(event.amountEndMl, unit) ?? ""}
-                              onChange={(e) => set({ amountEndMl: fromDisplay(parseNum(e.target.value), unit) })}
-                              placeholder="0"
+                              value={toDisplay(event.amountStartMl, unit) ?? ""}
+                              onChange={(e) => set({ amountStartMl: fromDisplay(parseNum(e.target.value), unit) })}
+                              placeholder={unit === "ml" ? "60" : "2"}
                             />
-                          ) : (
-                            <Input
-                              id="amt-end"
-                              inputMode="numeric"
-                              value={event.percent ?? ""}
-                              onChange={(e) => set({ percent: parseNum(e.target.value) })}
-                              placeholder="100"
-                            />
+                          </Field>
+                          {bottleMode === "left" && (
+                            <Field>
+                              <FieldLabel htmlFor="amt-end">Left over ({unit})</FieldLabel>
+                              <Input
+                                id="amt-end"
+                                inputMode="decimal"
+                                value={toDisplay(event.amountEndMl, unit) ?? ""}
+                                onChange={(e) => set({ amountEndMl: fromDisplay(parseNum(e.target.value), unit) })}
+                                placeholder="0"
+                              />
+                            </Field>
                           )}
                         </div>
-                      </div>
-                      <ToggleGroup
-                        type="single"
-                        value={bottleMode}
-                        onValueChange={(v) => v && setBottleMode(v as "left" | "percent")}
-                      >
-                        <ToggleGroupItem value="left" className="h-8 text-xs">
-                          Measure what's left
-                        </ToggleGroupItem>
-                        <ToggleGroupItem value="percent" className="h-8 text-xs">
-                          Estimate % drank
-                        </ToggleGroupItem>
-                      </ToggleGroup>
-                      {drank !== undefined && (
-                        <p className="text-sm">
-                          She drank about <strong>{formatAmount(drank, unit)}</strong>.
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="grid gap-2">
-                      <Label>How well did she eat?</Label>
-                      <ToggleGroup
-                        type="single"
-                        value={event.confidence ? String(event.confidence) : ""}
-                        onValueChange={(v) => set({ confidence: v ? Number(v) : undefined })}
-                      >
-                        {[1, 2, 3, 4, 5].map((n) => (
-                          <ToggleGroupItem key={n} value={String(n)}>
-                            {n}
+                        <ToggleGroup
+                          type="single"
+                          value={bottleMode}
+                          onValueChange={(v) => {
+                            if (!v) return
+                            setBottleMode(v as "left" | "percent")
+                            if (v === "percent" && event.percent === undefined) set({ percent: 100 })
+                          }}
+                        >
+                          <ToggleGroupItem value="left" className="h-8 text-xs">
+                            Measure what's left
                           </ToggleGroupItem>
+                          <ToggleGroupItem value="percent" className="h-8 text-xs">
+                            Estimate % drank
+                          </ToggleGroupItem>
+                        </ToggleGroup>
+                        {bottleMode === "percent" && (
+                          <Field className="gap-3 pt-1" data-vaul-no-drag>
+                            <div className="flex items-baseline justify-between">
+                              <FieldLabel htmlFor="percent">Drank</FieldLabel>
+                              <span className="text-2xl font-semibold tabular-nums">{event.percent ?? 100}%</span>
+                            </div>
+                            <Slider
+                              id="percent"
+                              min={0}
+                              max={100}
+                              step={5}
+                              value={[event.percent ?? 100]}
+                              onValueChange={([v]) => set({ percent: v })}
+                              aria-label="Percent of the bottle she drank"
+                            />
+                            <div className="text-muted-foreground flex justify-between text-xs tabular-nums">
+                              <span>0%</span>
+                              <span>50%</span>
+                              <span>100%</span>
+                            </div>
+                          </Field>
+                        )}
+                        {drank !== undefined && (
+                          <FieldDescription>
+                            She drank about <strong className="text-foreground">{formatAmount(drank, unit)}</strong>.
+                          </FieldDescription>
+                        )}
+                      </Field>
+                    ) : (
+                      <Field>
+                        <FieldTitle>How well did she eat?</FieldTitle>
+                        <ToggleGroup
+                          type="single"
+                          value={event.confidence ? String(event.confidence) : ""}
+                          onValueChange={(v) => set({ confidence: v ? Number(v) : undefined })}
+                        >
+                          {CONFIDENCE_ICONS.map((Icon, i) => (
+                            <ToggleGroupItem
+                              key={i}
+                              value={String(i + 1)}
+                              aria-label={`${i + 1}: ${confidenceLabel(i + 1)}`}
+                              className="h-14 flex-col gap-0.5 text-xs"
+                            >
+                              <Icon className="size-5" />
+                              {i + 1}
+                            </ToggleGroupItem>
+                          ))}
+                        </ToggleGroup>
+                        <FieldDescription>
+                          {event.confidence
+                            ? confidenceLabel(event.confidence)
+                            : "1 means she barely ate, 5 means a great feed."}
+                        </FieldDescription>
+                      </Field>
+                    )}
+                  </>
+                )}
+
+                {event.type === "diaper" && (
+                  <>
+                    <Field>
+                      <FieldTitle>What was in it?</FieldTitle>
+                      <ToggleGroup
+                        type="single"
+                        value={event.kind}
+                        onValueChange={(v) => v && set({ kind: v })}
+                        className="grid grid-cols-2"
+                      >
+                        {(Object.keys(DIAPER_LABELS) as DiaperKind[]).map((k) => (
+                          <KindOption key={k} type="diaper" kind={k} label={DIAPER_LABELS[k]} />
                         ))}
                       </ToggleGroup>
-                      <p className="text-muted-foreground text-sm">
-                        {event.confidence ? confidenceLabel(event.confidence) : "1 means barely ate, 5 means a great feed."}
-                      </p>
-                    </div>
-                  )}
-                </>
-              )}
+                    </Field>
+                    <DateTimeField
+                      id="start"
+                      label="Time"
+                      value={event.start}
+                      onChange={(v) => v && set({ start: v })}
+                    />
+                  </>
+                )}
 
-              {event.type === "diaper" && (
-                <>
-                  <div className="grid gap-2">
-                    <Label>What was in it?</Label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })} className="contents">
-                        <ToggleGroupItem value="wet">
-                          <Droplet /> Wet
-                        </ToggleGroupItem>
-                        <ToggleGroupItem value="stool">Stool</ToggleGroupItem>
-                        <ToggleGroupItem value="both">Wet + stool</ToggleGroupItem>
-                        <ToggleGroupItem value="dry">Checked, clean</ToggleGroupItem>
+                {event.type === "med" && (
+                  <>
+                    <Field>
+                      <FieldTitle>Medication</FieldTitle>
+                      <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>
+                        {(Object.keys(MED_LABELS) as MedKind[]).map((k) => (
+                          <KindOption key={k} type="med" kind={k} label={MED_LABELS[k]} />
+                        ))}
                       </ToggleGroup>
-                    </div>
-                  </div>
-                  <DateTimeField id="start" label="Time" value={event.start} onChange={(v) => v && set({ start: v })} />
-                </>
-              )}
+                    </Field>
+                    <DateTimeField
+                      id="start"
+                      label="Taken at"
+                      value={event.start}
+                      onChange={(v) => v && set({ start: v })}
+                    />
+                  </>
+                )}
 
-              {event.type === "med" && (
-                <>
-                  <div className="grid gap-2">
-                    <Label>Medication</Label>
-                    <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>
-                      <ToggleGroupItem value="ibuprofen">
-                        <Pill /> Ibuprofen
-                      </ToggleGroupItem>
-                      <ToggleGroupItem value="tylenol">
-                        <Pill /> Tylenol
-                      </ToggleGroupItem>
-                    </ToggleGroup>
-                  </div>
-                  <DateTimeField id="start" label="Taken at" value={event.start} onChange={(v) => v && set({ start: v })} />
-                </>
-              )}
-
-              <div className="grid gap-1.5">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={event.notes ?? ""}
-                  onChange={(e) => set({ notes: e.target.value || undefined })}
-                  placeholder="Optional"
-                  rows={2}
-                />
-              </div>
+                <Field>
+                  <FieldLabel htmlFor="notes">Notes</FieldLabel>
+                  <Textarea
+                    id="notes"
+                    value={event.notes ?? ""}
+                    onChange={(e) => set({ notes: e.target.value || undefined })}
+                    placeholder="Optional"
+                    rows={2}
+                  />
+                </Field>
+              </FieldGroup>
               <button type="submit" hidden />
             </form>
 
-            <SheetFooter className="pt-1">
+            <DrawerFooter>
               <Button size="lg" disabled={saving} onClick={() => submit()}>
-                {saving ? "Saving…" : editing ? "Save changes" : "Save"}
+                {saving && <Spinner />}
+                {saving ? "Saving" : editing ? "Save changes" : "Save"}
               </Button>
               {!editing && event.type === "feeding" && (
                 <Button size="lg" variant="outline" disabled={saving} onClick={() => submit({ end: undefined })}>
@@ -301,22 +372,38 @@ export function EntrySheet({
                 </Button>
               )}
               {editing && (
-                <Button
-                  variant={confirmDelete ? "destructive" : "ghost"}
-                  className={confirmDelete ? "" : "text-destructive"}
-                  onClick={() => {
-                    if (!confirmDelete) return setConfirmDelete(true)
-                    onDelete(event.id)
-                    onClose()
-                  }}
-                >
-                  <Trash2 /> {confirmDelete ? "Tap again to delete" : "Delete"}
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="ghost" className="text-destructive hover:text-destructive">
+                      <Trash2 /> Delete
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        It disappears from the app for everyone. A copy stays in the Google Sheet, marked as deleted.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep it</AlertDialogCancel>
+                      <AlertDialogAction
+                        variant="destructive"
+                        onClick={() => {
+                          onDelete(event.id)
+                          onClose()
+                        }}
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               )}
-            </SheetFooter>
+            </DrawerFooter>
           </>
         )}
-      </SheetContent>
-    </Sheet>
+      </DrawerContent>
+    </Drawer>
   )
 }

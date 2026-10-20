@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react"
-import { CloudOff, History as HistoryIcon, House, Loader2, Settings as SettingsIcon } from "lucide-react"
+import { CloudOff, History as HistoryIcon, House, RefreshCw, Settings as SettingsIcon, UserRound } from "lucide-react"
 
 import { Dashboard } from "@/components/dashboard"
 import { EntrySheet, type Draft } from "@/components/entry-sheet"
 import { History } from "@/components/history"
 import { SettingsView, type Theme } from "@/components/settings-view"
 import { SetupScreen } from "@/components/setup-screen"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { Toaster } from "@/components/ui/sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useLocalState } from "@/hooks/use-local-state"
@@ -56,7 +59,11 @@ export default function App() {
 
   return (
     <>
-      {conn ? <Tracker conn={conn} onSignOut={() => connect(null)} theme={theme} onTheme={setTheme} /> : <SetupScreen onConnect={connect} />}
+      {conn ? (
+        <Tracker conn={conn} onSignOut={() => connect(null)} theme={theme} onTheme={setTheme} />
+      ) : (
+        <SetupScreen onConnect={connect} />
+      )}
       <Toaster position="top-center" richColors closeButton />
     </>
   )
@@ -81,11 +88,15 @@ function Tracker({
 
   if (tracker.sessionError) {
     return (
-      <div className="mx-auto grid min-h-dvh max-w-md content-center gap-4 p-6 text-center">
-        <CloudOff className="text-muted-foreground mx-auto size-10" />
-        <h1 className="text-xl font-semibold">Couldn't sign in</h1>
-        <p className="text-muted-foreground text-sm">{tracker.sessionError}</p>
-        <Button onClick={() => location.reload()}>Try again</Button>
+      <div className="mx-auto grid min-h-dvh max-w-md content-center gap-4 p-6">
+        <Alert variant="destructive">
+          <CloudOff />
+          <AlertTitle>Couldn't sign in</AlertTitle>
+          <AlertDescription>{tracker.sessionError}</AlertDescription>
+        </Alert>
+        <Button onClick={() => location.reload()}>
+          <RefreshCw /> Try again
+        </Button>
         <Button variant="ghost" onClick={onSignOut}>
           Use a different code
         </Button>
@@ -98,29 +109,47 @@ function Tracker({
       <header className="bg-background/85 sticky top-0 z-10 flex items-center justify-between px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
         <h1 className="text-xl font-semibold">{tracker.settings.babyName}</h1>
         <div className="text-muted-foreground flex items-center gap-2 text-xs">
-          {tracker.loading && <Loader2 className="size-3.5 animate-spin" />}
+          {tracker.loading && <Spinner className="size-3.5" />}
           {tracker.error && !tracker.loading && (
             <button className="text-destructive flex items-center gap-1" onClick={tracker.refresh}>
               <CloudOff className="size-3.5" /> Offline, tap to retry
             </button>
           )}
-          {tracker.user && <span>{tracker.user}</span>}
+          {tracker.user && (
+            <span className="flex items-center gap-1">
+              <UserRound className="size-3.5" /> {tracker.user}
+            </span>
+          )}
         </div>
       </header>
 
       <main className="px-4 pb-28">
         <TabsContent value="now">
-          <Dashboard
-            status={status}
-            user={tracker.user}
-            unit={unit}
-            onOpen={setDraft}
-            onSave={tracker.save}
-            onRemove={tracker.remove}
-          />
+          {tracker.loading && tracker.events.length === 0 ? (
+            <div className="grid gap-4">
+              <Skeleton className="h-56 rounded-xl" />
+              <Skeleton className="h-52 rounded-xl" />
+              <Skeleton className="h-60 rounded-xl" />
+            </div>
+          ) : (
+            <Dashboard
+              status={status}
+              user={tracker.user}
+              unit={unit}
+              onOpen={setDraft}
+              onSave={tracker.save}
+              onRemove={tracker.remove}
+            />
+          )}
         </TabsContent>
         <TabsContent value="history">
-          <History events={tracker.events} unit={unit} days={tracker.days} onOpen={setDraft} onLoadMore={tracker.loadMore} />
+          <History
+            events={tracker.events}
+            unit={unit}
+            days={tracker.days}
+            onOpen={setDraft}
+            onLoadMore={tracker.loadMore}
+          />
         </TabsContent>
         <TabsContent value="settings">
           <SettingsView

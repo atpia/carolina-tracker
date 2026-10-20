@@ -1,13 +1,30 @@
 import { useMemo, useState } from "react"
+import { History as HistoryIcon, List } from "lucide-react"
 
 import type { Draft } from "@/components/entry-sheet"
 import { EventIcon } from "@/components/event-icon"
 import { eventDetails, eventTitle } from "@/components/describe"
+import { TYPE_ICONS } from "@/components/icons"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { formatClock, formatDay } from "@/lib/time"
 import type { EventType, LogEvent } from "@/lib/types"
 import type { Unit } from "@/lib/units"
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?"
+}
+
+const FILTERS: { value: "all" | EventType; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "feeding", label: "Feeds" },
+  { value: "diaper", label: "Diapers" },
+  { value: "med", label: "Meds" },
+]
 
 export function History({
   events,
@@ -40,44 +57,67 @@ export function History({
   return (
     <div className="grid gap-4">
       <ToggleGroup type="single" value={filter} onValueChange={(v) => v && setFilter(v as typeof filter)}>
-        <ToggleGroupItem value="all">All</ToggleGroupItem>
-        <ToggleGroupItem value="feeding">Feeds</ToggleGroupItem>
-        <ToggleGroupItem value="diaper">Diapers</ToggleGroupItem>
-        <ToggleGroupItem value="med">Meds</ToggleGroupItem>
+        {FILTERS.map(({ value, label }) => {
+          const Icon = value === "all" ? List : TYPE_ICONS[value]
+          return (
+            <ToggleGroupItem key={value} value={value} className="px-1 text-xs">
+              <Icon /> {label}
+            </ToggleGroupItem>
+          )
+        })}
       </ToggleGroup>
 
       {groups.length === 0 && (
-        <p className="text-muted-foreground py-10 text-center text-sm">Nothing logged in the last {days} days.</p>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia>
+              <HistoryIcon />
+            </EmptyMedia>
+            <EmptyTitle>Nothing here yet</EmptyTitle>
+            <EmptyDescription>
+              Nothing was logged in the last {days} days. Entries from every caregiver show up here.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       )}
 
       {groups.map((g) => (
-        <section key={g.day} className="grid gap-1">
+        <section key={g.day} className="grid gap-1.5">
           <h2 className="text-muted-foreground px-1 text-xs font-semibold tracking-wide uppercase">{g.day}</h2>
-          <div className="bg-card divide-y rounded-xl border">
+          <ItemGroup className="bg-card divide-y overflow-hidden rounded-xl border">
             {g.items.map((e) => (
-              <button
-                key={e.id}
-                onClick={() => onOpen({ ...e, edit: true })}
-                className="hover:bg-muted/60 flex w-full items-center gap-3 px-3 py-2.5 text-left first:rounded-t-xl last:rounded-b-xl"
-              >
-                <EventIcon event={e} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate font-medium">{eventTitle(e)}</span>
-                    <span className="text-muted-foreground shrink-0 text-sm tabular-nums">{formatClock(e.start)}</span>
-                  </div>
-                  <div className="text-muted-foreground truncate text-sm">
-                    {[eventDetails(e, unit), e.notes, e.by].filter(Boolean).join(" · ")}
-                  </div>
-                </div>
-              </button>
+              <Item key={e.id} asChild className="rounded-none">
+                <button onClick={() => onOpen({ ...e, edit: true })}>
+                  <ItemMedia>
+                    <EventIcon event={e} />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle className="w-full justify-between">
+                      <span className="truncate">{eventTitle(e)}</span>
+                      <span className="text-muted-foreground shrink-0 font-normal tabular-nums">
+                        {formatClock(e.start)}
+                      </span>
+                    </ItemTitle>
+                    {(eventDetails(e, unit) || e.notes) && (
+                      <ItemDescription className="line-clamp-1">
+                        {[eventDetails(e, unit), e.notes].filter(Boolean).join(" · ")}
+                      </ItemDescription>
+                    )}
+                  </ItemContent>
+                  <ItemActions>
+                    <Avatar className="size-7" title={`Logged by ${e.by}`}>
+                      <AvatarFallback className="text-[0.65rem] font-medium">{initials(e.by)}</AvatarFallback>
+                    </Avatar>
+                  </ItemActions>
+                </button>
+              </Item>
             ))}
-          </div>
+          </ItemGroup>
         </section>
       ))}
 
       <Button variant="outline" onClick={onLoadMore}>
-        Show older entries
+        <HistoryIcon /> Show older entries
       </Button>
     </div>
   )

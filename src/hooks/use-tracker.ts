@@ -63,7 +63,7 @@ export function useTracker(conn: Connection) {
         pending.current--
       }
     },
-    [backend, events]
+    [backend, events],
   )
 
   const remove = useCallback(
@@ -80,7 +80,7 @@ export function useTracker(conn: Connection) {
         pending.current--
       }
     },
-    [backend, events]
+    [backend, events],
   )
 
   return {
