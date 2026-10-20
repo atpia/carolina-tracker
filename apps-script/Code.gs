@@ -34,20 +34,15 @@ var TYPES = { feeding: true, diaper: true, med: true };
 // ---------------------------------------------------------------------------
 // Menu and one-time setup
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Baby tracker')
-    .addItem('1. Set up tabs and codes', 'setup')
-    .addItem('2. Refresh setup links', 'refreshSetupLinks')
-    .addItem('3. Turn on Discord reminders', 'enableReminders')
-    .addSeparator()
-    .addItem('Send a test Discord message', 'testDiscord')
-    .addItem('Turn off Discord reminders', 'disableReminders')
-    .addToUi();
-}
-
+/**
+ * Run this first. Keep it the first function in the file so the editor's
+ * Run button picks it by default.
+ */
 function setup() {
   var ss = SpreadsheetApp.getActive();
+  if (!ss) {
+    throw new Error('This script is not attached to a Sheet. Open your Google Sheet, use Extensions → Apps Script there, and paste the code into that editor.');
+  }
 
   var events = ensureSheet_(ss, 'Events', EVENT_HEADERS);
   events.setFrozenRows(1);
@@ -77,6 +72,19 @@ function setup() {
 
   refreshSetupLinks();
   toast_('Tabs are ready. Rename people in the Users tab, then deploy the web app (see SETUP.md).');
+}
+
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Baby tracker')
+    .addItem('1. Set up tabs and codes', 'setup')
+    .addItem('2. Refresh setup links', 'refreshSetupLinks')
+    .addItem('3. Turn on Discord reminders', 'enableReminders')
+    .addSeparator()
+    .addItem('Send a test Discord message', 'testDiscord')
+    .addItem('Turn off Discord reminders', 'disableReminders')
+    .addToUi();
 }
 
 function refreshSetupLinks() {

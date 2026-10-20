@@ -13,10 +13,10 @@ You need:
 2. Open **File → Settings** and set the time zone to yours. This only affects how times look in the Sheet.
 3. Open **Extensions → Apps Script**. A code editor opens in a new tab.
 4. Delete everything in `Code.gs` and paste in the whole contents of [`apps-script/Code.gs`](apps-script/Code.gs). Use the **Raw** button on GitHub so you can copy it all. Click the 💾 save icon.
-5. In the toolbar, pick **setup** from the function dropdown and click **Run**.
+5. In the toolbar, make sure the function dropdown next to **Debug** says **setup** (not `onOpen`), then click **Run**. The Execution log at the bottom should end with "Execution completed".
 6. Google asks for permission. Click **Review permissions**, choose your account, then **Advanced → Go to Untitled project (unsafe) → Allow**. The warning appears because you wrote the script yourself and Google hasn't reviewed it. The script can only touch this one spreadsheet and send messages to Discord.
 
-Back in the Sheet you'll now have three tabs:
+Back in the Sheet you'll now have three tabs along the bottom (you may need to reload the page):
 
 | Tab | What it's for |
 | --- | --- |
