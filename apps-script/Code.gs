@@ -1,0 +1,429 @@
+/**
+ * Baby tracker backend. Paste this whole file into Extensions → Apps Script
+ * of the Google Sheet that should hold the data. See SETUP.md.
+ *
+ * The web app is deployed "Execute as: Me" and "Who has access: Anyone", so the
+ * URL itself is reachable, but every request must carry a personal code from the
+ * Users tab. Without a valid code nothing is read or written.
+ */
+
+var EVENT_HEADERS = [
+  'id', 'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent',
+  'confidence', 'notes', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'deleted',
+];
+var USER_HEADERS = ['name', 'code', 'active', 'setupLink'];
+var DEFAULT_SETTINGS = [
+  ['babyName', 'Carolina', 'Shown at the top of the app'],
+  ['feedMinH', 2, 'Hours after a feeding starts when the next window opens'],
+  ['feedMaxH', 4, 'Hours after a feeding starts when the next one is due'],
+  ['medIntervalH', 4, "Hours between mom's doses (alternating ibuprofen and Tylenol)"],
+  ['diaperCheckH', 3, 'Hours between diaper checks'],
+  ['appUrl', 'https://atpia.github.io/carolina-tracker/', 'Where the app is hosted, used for setup links'],
+  ['apiUrl', '', 'Web app URL from Deploy → Manage deployments (ends in /exec), used for setup links'],
+  ['discordWebhook', '', 'Discord channel webhook URL for reminders (leave blank for none)'],
+  ['remindFeeding', true, 'Discord alert when the feeding window opens and when it is overdue'],
+  ['remindDiaper', true, 'Discord alert when a diaper check is due'],
+  ['remindMeds', true, "Discord alert when mom's next dose is due"],
+  ['announceEntries', false, 'Also post every new entry to Discord'],
+];
+var DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
+var NUMBER_FIELDS = { amountStartMl: true, amountEndMl: true, percent: true, confidence: true };
+var EDITABLE_FIELDS = ['type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent', 'confidence', 'notes'];
+var TYPES = { feeding: true, diaper: true, med: true };
+
+// ---------------------------------------------------------------------------
+// Menu and one-time setup
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Baby tracker')
+    .addItem('1. Set up tabs and codes', 'setup')
+    .addItem('2. Refresh setup links', 'refreshSetupLinks')
+    .addItem('3. Turn on Discord reminders', 'enableReminders')
+    .addSeparator()
+    .addItem('Send a test Discord message', 'testDiscord')
+    .addItem('Turn off Discord reminders', 'disableReminders')
+    .addToUi();
+}
+
+function setup() {
+  var ss = SpreadsheetApp.getActive();
+
+  var events = ensureSheet_(ss, 'Events', EVENT_HEADERS);
+  events.setFrozenRows(1);
+  events.getRange('D:E').setNumberFormat('yyyy-mm-dd h:mm am/pm');
+  events.getRange('L:M').setNumberFormat('yyyy-mm-dd h:mm am/pm');
+
+  var users = ensureSheet_(ss, 'Users', USER_HEADERS);
+  users.setFrozenRows(1);
+  if (users.getLastRow() < 2) {
+    users.getRange(2, 1, 3, 3).setValues([
+      ['Abel', newCode_(), true],
+      ['Caregiver 2', newCode_(), true],
+      ['Caregiver 3', newCode_(), true],
+    ]);
+  }
+
+  var settings = ensureSheet_(ss, 'Settings', ['key', 'value', 'notes']);
+  settings.setFrozenRows(1);
+  var existing = readSettings_();
+  var missing = DEFAULT_SETTINGS.filter(function (row) { return !(row[0] in existing); });
+  if (missing.length) {
+    settings.getRange(settings.getLastRow() + 1, 1, missing.length, 3).setValues(missing);
+  }
+
+  var stray = ss.getSheetByName('Sheet1');
+  if (stray && stray.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(stray);
+
+  refreshSetupLinks();
+  toast_('Tabs are ready. Rename people in the Users tab, then deploy the web app (see SETUP.md).');
+}
+
+function refreshSetupLinks() {
+  var settings = readSettings_();
+  var webAppUrl = String(settings.apiUrl || '').trim();
+  var sheet = SpreadsheetApp.getActive().getSheetByName('Users');
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+  var links = rows.map(function (r) {
+    if (!webAppUrl || !r[1]) return ['Deploy the web app, paste its URL into Settings → apiUrl, then run "Refresh setup links"'];
+    return [String(settings.appUrl) + '#api=' + encodeURIComponent(webAppUrl) + '&code=' + encodeURIComponent(r[1])];
+  });
+  sheet.getRange(2, 4, links.length, 1).setValues(links);
+  if (webAppUrl) toast_('Setup links updated. Send each person only their own link.');
+}
+
+function ensureSheet_(ss, name, headers) {
+  var sheet = ss.getSheetByName(name) || ss.insertSheet(name);
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function newCode_() {
+  // 12 characters from an alphabet without look-alikes (~60 bits).
+  var alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Math.random());
+  var out = '';
+  for (var i = 0; i < 12; i++) out += alphabet[(bytes[i] + 128) % alphabet.length];
+  return out.slice(0, 4) + '-' + out.slice(4, 8) + '-' + out.slice(8);
+}
+
+function toast_(msg) {
+  try {
+    SpreadsheetApp.getActive().toast(msg, 'Baby tracker', 8);
+  } catch (e) {
+    Logger.log(msg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Web app
+
+function doGet() {
+  return ContentService.createTextOutput('The baby tracker API is running. Open the app link instead.');
+}
+
+function doPost(e) {
+  var out;
+  try {
+    var req = JSON.parse(e.postData.contents);
+    var user = authenticate_(req.code);
+    out = { ok: true, result: handle_(req, user) };
+  } catch (err) {
+    out = { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function handle_(req, user) {
+  switch (req.action) {
+    case 'session':
+      return { user: user, users: activeUsers_().map(function (u) { return u.name; }), settings: clientSettings_() };
+    case 'list':
+      return listEvents_(Number(req.days) || 7);
+    case 'save':
+      return withLock_(function () { return saveEvent_(req.event, user); });
+    case 'delete':
+      return withLock_(function () { return deleteEvent_(req.id, user); });
+    default:
+      throw new Error('Unknown action');
+  }
+}
+
+function authenticate_(code) {
+  code = String(code || '').trim().toLowerCase();
+  var match = code && activeUsers_().filter(function (u) { return u.code === code; })[0];
+  if (!match) {
+    // Slow down guessing.
+    Utilities.sleep(1500);
+    throw new Error('That code is not valid. Ask for your personal setup link.');
+  }
+  return match.name;
+}
+
+function activeUsers_() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName('Users');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues()
+    .filter(function (r) { return r[0] && r[1] && r[2] !== false && String(r[2]).toUpperCase() !== 'FALSE'; })
+    .map(function (r) { return { name: String(r[0]).trim(), code: String(r[1]).trim().toLowerCase() }; });
+}
+
+function readSettings_() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName('Settings');
+  var out = {};
+  if (!sheet || sheet.getLastRow() < 2) return out;
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues().forEach(function (r) {
+    if (r[0]) out[String(r[0]).trim()] = r[1];
+  });
+  return out;
+}
+
+function settingsWithDefaults_() {
+  var s = readSettings_();
+  DEFAULT_SETTINGS.forEach(function (row) {
+    if (!(row[0] in s) || s[row[0]] === '') s[row[0]] = row[1];
+  });
+  return s;
+}
+
+function clientSettings_() {
+  var s = settingsWithDefaults_();
+  return {
+    babyName: String(s.babyName),
+    feedMinH: Number(s.feedMinH),
+    feedMaxH: Number(s.feedMaxH),
+    medIntervalH: Number(s.medIntervalH),
+    diaperCheckH: Number(s.diaperCheckH),
+  };
+}
+
+function withLock_(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Events
+
+function eventsSheet_() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName('Events');
+  if (!sheet) throw new Error('Run "Baby tracker → Set up tabs and codes" in the Sheet first.');
+  return sheet;
+}
+
+function rowToEvent_(row) {
+  var e = {};
+  EVENT_HEADERS.forEach(function (h, i) {
+    var v = row[i];
+    if (v === '' || v === null) return;
+    if (DATE_FIELDS[h]) v = v instanceof Date ? v.toISOString() : new Date(v).toISOString();
+    else if (NUMBER_FIELDS[h]) v = Number(v);
+    else if (h !== 'deleted') v = String(v);
+    e[h] = v;
+  });
+  return e;
+}
+
+function eventToRow_(e) {
+  return EVENT_HEADERS.map(function (h) {
+    var v = e[h];
+    if (v === undefined || v === null) return '';
+    if (DATE_FIELDS[h]) return v ? new Date(v) : '';
+    return v;
+  });
+}
+
+function allEvents_() {
+  var sheet = eventsSheet_();
+  if (sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, EVENT_HEADERS.length).getValues()
+    .map(rowToEvent_)
+    .filter(function (e) { return e.id && e.deleted !== true && String(e.deleted).toUpperCase() !== 'TRUE'; });
+}
+
+function listEvents_(days) {
+  var since = Date.now() - days * 86400000;
+  return allEvents_()
+    .filter(function (e) { return new Date(e.start).getTime() >= since; })
+    .map(function (e) { delete e.deleted; return e; });
+}
+
+function findRow_(id) {
+  var sheet = eventsSheet_();
+  if (!id || sheet.getLastRow() < 2) return 0;
+  var hit = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).createTextFinder(String(id)).matchEntireCell(true).findNext();
+  return hit ? hit.getRow() : 0;
+}
+
+function validate_(e) {
+  if (!e || !TYPES[e.type]) throw new Error('Unknown entry type');
+  if (!e.kind) throw new Error('Missing entry kind');
+  if (!e.start || isNaN(new Date(e.start).getTime())) throw new Error('Missing start time');
+  if (e.end && isNaN(new Date(e.end).getTime())) throw new Error('Bad end time');
+  if (e.notes && String(e.notes).length > 1000) throw new Error('Notes are too long');
+}
+
+function saveEvent_(input, user) {
+  validate_(input);
+  var sheet = eventsSheet_();
+  var now = new Date().toISOString();
+  var row = findRow_(input.id);
+  var event;
+  if (row) {
+    event = rowToEvent_(sheet.getRange(row, 1, 1, EVENT_HEADERS.length).getValues()[0]);
+    EDITABLE_FIELDS.forEach(function (f) { event[f] = input[f]; });
+    event.updatedAt = now;
+    event.updatedBy = user;
+    sheet.getRange(row, 1, 1, EVENT_HEADERS.length).setValues([eventToRow_(event)]);
+  } else {
+    event = { id: String(input.id || Utilities.getUuid()), by: user, createdAt: now, updatedAt: now };
+    EDITABLE_FIELDS.forEach(function (f) { event[f] = input[f]; });
+    sheet.appendRow(eventToRow_(event));
+    announce_(event);
+  }
+  delete event.deleted;
+  return event;
+}
+
+function deleteEvent_(id, user) {
+  var row = findRow_(id);
+  if (!row) return true;
+  // Soft delete so a mistaken delete can be recovered from the Sheet.
+  var sheet = eventsSheet_();
+  sheet.getRange(row, EVENT_HEADERS.indexOf('deleted') + 1).setValue(true);
+  sheet.getRange(row, EVENT_HEADERS.indexOf('updatedBy') + 1).setValue(user);
+  sheet.getRange(row, EVENT_HEADERS.indexOf('updatedAt') + 1).setValue(new Date());
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Discord
+
+var LABELS = {
+  left: 'Left breast', right: 'Right breast', both: 'Both breasts', formula: 'Formula', expressed: 'Expressed milk',
+  wet: 'Wet diaper', stool: 'Stool diaper', dry: 'Diaper check (clean)',
+  ibuprofen: 'Ibuprofen', tylenol: 'Tylenol',
+};
+
+function label_(e) {
+  if (e.type === 'diaper' && e.kind === 'both') return 'Wet + stool diaper';
+  return LABELS[e.kind] || e.kind;
+}
+
+/** Discord renders these in each reader's own time zone. */
+function ts_(ms, style) {
+  return '<t:' + Math.floor(ms / 1000) + ':' + (style || 't') + '>';
+}
+
+function postDiscord_(content) {
+  var url = String(settingsWithDefaults_().discordWebhook || '').trim();
+  if (!url) return false;
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ content: content, username: settingsWithDefaults_().babyName + ' tracker' }),
+    muteHttpExceptions: true,
+  });
+  return res.getResponseCode() < 300;
+}
+
+function announce_(e) {
+  var s = settingsWithDefaults_();
+  if (!truthy_(s.announceEntries)) return;
+  try {
+    postDiscord_('📝 ' + e.by + ' logged **' + label_(e) + '** at ' + ts_(new Date(e.start).getTime()));
+  } catch (err) {
+    Logger.log(err);
+  }
+}
+
+function truthy_(v) {
+  return v === true || String(v).toUpperCase() === 'TRUE';
+}
+
+function testDiscord() {
+  var ok = postDiscord_('👋 The baby tracker can post here. Reminders will show up in this channel.');
+  toast_(ok ? 'Sent! Check your Discord channel.' : 'Nothing sent. Paste the webhook URL into Settings → discordWebhook first.');
+}
+
+function enableReminders() {
+  disableReminders();
+  ScriptApp.newTrigger('checkReminders').timeBased().everyMinutes(5).create();
+  toast_('Discord reminders are on. They are checked every 5 minutes.');
+}
+
+function disableReminders() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'checkReminders') ScriptApp.deleteTrigger(t);
+  });
+}
+
+function latest_(events, pred) {
+  var best = null;
+  events.forEach(function (e) {
+    if (pred(e) && (!best || new Date(e.start) > new Date(best.start))) best = e;
+  });
+  return best;
+}
+
+/** Runs every 5 minutes from a trigger. Each reminder is sent once per entry. */
+function checkReminders() {
+  var s = settingsWithDefaults_();
+  if (!String(s.discordWebhook || '').trim()) return;
+  var H = 3600000;
+  var now = Date.now();
+  var events = listEvents_(3);
+  var props = PropertiesService.getScriptProperties();
+  var sent = JSON.parse(props.getProperty('sentReminders') || '[]');
+  var messages = [];
+
+  function once(key, due, message) {
+    // Skip anything more than 6 hours stale, e.g. right after reminders are first turned on.
+    if (now < due || now - due > 6 * H || sent.indexOf(key) >= 0) return;
+    sent.push(key);
+    messages.push(message);
+  }
+
+  if (truthy_(s.remindFeeding)) {
+    var feed = latest_(events, function (e) { return e.type === 'feeding'; });
+    if (feed) {
+      var started = new Date(feed.start).getTime();
+      var by = started + Number(s.feedMaxH) * H;
+      once('feedopen:' + feed.id, started + Number(s.feedMinH) * H,
+        '🍼 Feeding window is open. Last feed (' + label_(feed) + ') started ' + ts_(started) + ', next one due by ' + ts_(by) + '.');
+      once('feeddue:' + feed.id, by,
+        '⏰ Feeding is due now. It has been ' + s.feedMaxH + ' hours since the last one started at ' + ts_(started) + '.');
+    }
+  }
+
+  if (truthy_(s.remindDiaper)) {
+    var check = latest_(events, function (e) { return e.type === 'diaper'; });
+    if (check) {
+      var checkedAt = new Date(check.start).getTime();
+      once('diaper:' + check.id, checkedAt + Number(s.diaperCheckH) * H,
+        '🧷 Time for a diaper check. Last checked ' + ts_(checkedAt, 'R') + ' by ' + check.by + '.');
+    }
+  }
+
+  if (truthy_(s.remindMeds)) {
+    var med = latest_(events, function (e) { return e.type === 'med'; });
+    if (med) {
+      var tookAt = new Date(med.start).getTime();
+      var next = med.kind === 'ibuprofen' ? 'Tylenol' : 'Ibuprofen';
+      once('med:' + med.id, tookAt + Number(s.medIntervalH) * H,
+        '💊 Mom can take **' + next + '** now. Last dose was ' + label_(med) + ' at ' + ts_(tookAt) + '.');
+    }
+  }
+
+  if (messages.length && postDiscord_(messages.join('\n'))) {
+    props.setProperty('sentReminders', JSON.stringify(sent.slice(-100)));
+  }
+}
