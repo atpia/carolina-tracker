@@ -42,6 +42,7 @@ import {
   type MedKind,
 } from "@/lib/types"
 import { formatAmount, fromDisplay, toDisplay, type Unit } from "@/lib/units"
+import { cn } from "@/lib/utils"
 
 /** A new entry's starting values, or an existing entry with `edit: true`. */
 export type Draft = (Partial<LogEvent> & { type: EventType; edit?: false }) | (LogEvent & { edit: true })
@@ -275,30 +276,48 @@ export function EntrySheet({
                         )}
                       </Field>
                     ) : (
-                      <Field>
-                        <FieldTitle>How well did she eat?</FieldTitle>
-                        <ToggleGroup
-                          type="single"
-                          value={event.confidence ? String(event.confidence) : ""}
-                          onValueChange={(v) => set({ confidence: v ? Number(v) : undefined })}
-                        >
+                      <Field className="gap-3" data-vaul-no-drag>
+                        <div className="flex items-baseline justify-between">
+                          <FieldLabel htmlFor="confidence">How well did she eat?</FieldLabel>
+                          <span className="text-sm font-medium">
+                            {event.confidence
+                              ? `${event.confidence}/5 · ${confidenceLabel(event.confidence)}`
+                              : "Not rated"}
+                          </span>
+                        </div>
+                        <Slider
+                          id="confidence"
+                          min={1}
+                          max={5}
+                          step={1}
+                          value={[event.confidence ?? 3]}
+                          onValueChange={([v]) => set({ confidence: v })}
+                          className={cn(!event.confidence && "opacity-50")}
+                          aria-label="How well she ate, from 1 to 5"
+                        />
+                        {/* Each icon is as wide as the slider thumb, so their centers line up with the steps. */}
+                        <div className="flex justify-between">
                           {CONFIDENCE_ICONS.map((Icon, i) => (
-                            <ToggleGroupItem
+                            <button
                               key={i}
-                              value={String(i + 1)}
+                              type="button"
+                              onClick={() => set({ confidence: i + 1 })}
                               aria-label={`${i + 1}: ${confidenceLabel(i + 1)}`}
-                              className="h-14 flex-col gap-0.5 text-xs"
+                              className={cn(
+                                "flex w-6 flex-col items-center gap-0.5 text-xs tabular-nums transition-colors",
+                                event.confidence === i + 1 ? "text-foreground" : "text-muted-foreground",
+                              )}
                             >
-                              <Icon className="size-5" />
+                              <Icon className={cn("size-6", event.confidence === i + 1 && "stroke-[2.5]")} />
                               {i + 1}
-                            </ToggleGroupItem>
+                            </button>
                           ))}
-                        </ToggleGroup>
-                        <FieldDescription>
-                          {event.confidence
-                            ? confidenceLabel(event.confidence)
-                            : "1 means she barely ate, 5 means a great feed."}
-                        </FieldDescription>
+                        </div>
+                        {!event.confidence && (
+                          <FieldDescription>
+                            Slide or tap a face. 1 means she barely ate, 5 means a great feed.
+                          </FieldDescription>
+                        )}
                       </Field>
                     )}
                   </>
