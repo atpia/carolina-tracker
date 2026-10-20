@@ -67,6 +67,7 @@ export function EntrySheet({
   const [event, setEvent] = useState<LogEvent | null>(null)
   const [bottleMode, setBottleMode] = useState<"left" | "percent">("left")
   const [saving, setSaving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const editing = Boolean(draft?.edit)
 
   useEffect(() => {
@@ -74,6 +75,7 @@ export function EntrySheet({
     const { edit, ...rest } = draft
     const e = edit ? (rest as LogEvent) : blank(rest, user)
     setEvent(e)
+    setConfirmDelete(false)
     setBottleMode(e.percent !== undefined && e.amountEndMl === undefined ? "percent" : "left")
   }, [draft, user])
 
@@ -300,16 +302,15 @@ export function EntrySheet({
               )}
               {editing && (
                 <Button
-                  variant="ghost"
-                  className="text-destructive"
+                  variant={confirmDelete ? "destructive" : "ghost"}
+                  className={confirmDelete ? "" : "text-destructive"}
                   onClick={() => {
-                    if (confirm("Delete this entry?")) {
-                      onDelete(event.id)
-                      onClose()
-                    }
+                    if (!confirmDelete) return setConfirmDelete(true)
+                    onDelete(event.id)
+                    onClose()
                   }}
                 >
-                  <Trash2 /> Delete
+                  <Trash2 /> {confirmDelete ? "Tap again to delete" : "Delete"}
                 </Button>
               )}
             </SheetFooter>

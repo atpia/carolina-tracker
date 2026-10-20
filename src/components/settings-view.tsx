@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { LogOut } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -30,6 +31,8 @@ export function SettingsView({
   onTheme: (t: Theme) => void
   onSignOut: () => void
 }) {
+  const [confirmSignOut, setConfirmSignOut] = useState(false)
+
   return (
     <div className="grid gap-4">
       <Card>
@@ -56,8 +59,11 @@ export function SettingsView({
               <ToggleGroupItem value="dark">Dark</ToggleGroupItem>
             </ToggleGroup>
           </div>
-          <Button variant="outline" onClick={() => confirm("Sign out on this phone?") && onSignOut()}>
-            <LogOut /> {demo ? "Leave demo" : "Sign out"}
+          <Button
+            variant={confirmSignOut ? "destructive" : "outline"}
+            onClick={() => (confirmSignOut ? onSignOut() : setConfirmSignOut(true))}
+          >
+            <LogOut /> {confirmSignOut ? "Tap again to sign out" : demo ? "Leave demo" : "Sign out"}
           </Button>
         </CardContent>
       </Card>

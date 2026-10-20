@@ -28,8 +28,12 @@ function connectionFromHash(): Connection | null {
 function useTheme(theme: Theme) {
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)")
-    const apply = () =>
-      document.documentElement.classList.toggle("dark", theme === "dark" || (theme === "system" && media.matches))
+    const apply = () => {
+      // An embedding page can force a theme with data-theme on <html>.
+      const forced = document.documentElement.dataset.theme
+      const dark = theme === "system" ? (forced ? forced === "dark" : media.matches) : theme === "dark"
+      document.documentElement.classList.toggle("dark", dark)
+    }
     apply()
     media.addEventListener("change", apply)
     return () => media.removeEventListener("change", apply)
@@ -40,7 +44,7 @@ export default function App() {
   const [conn, setConn] = useState<Connection | null>(() => {
     const fromHash = connectionFromHash()
     if (fromHash) saveConnection(fromHash)
-    return fromHash ?? loadConnection()
+    return fromHash ?? loadConnection() ?? (import.meta.env.VITE_DEMO ? { api: "demo", code: "demo" } : null)
   })
   const [theme, setTheme] = useLocalState<Theme>("ct.theme", "system")
   useTheme(theme)

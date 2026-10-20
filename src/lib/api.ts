@@ -73,12 +73,33 @@ class RemoteBackend implements Backend {
 
 const DEMO_KEY = "ct.demo.events"
 
+/** A believable morning so the demo opens with something to look at. */
+function sampleEvents(): LogEvent[] {
+  const H = 3_600_000
+  const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * H).toISOString()
+  const e = (id: string, type: LogEvent["type"], kind: string, h: number, extra: Partial<LogEvent> = {}): LogEvent => ({
+    id, type, kind, start: at(h), by: "Demo", createdAt: at(h), ...extra,
+  })
+  return [
+    e("s1", "feeding", "left", 2.3, { end: at(2.0), confidence: 4 }),
+    e("s2", "diaper", "wet", 1.9),
+    e("s3", "med", "ibuprofen", 2.6),
+    e("s4", "feeding", "formula", 5.1, { end: at(4.9), amountStartMl: 60, amountEndMl: 15 }),
+    e("s5", "diaper", "stool", 4.8),
+    e("s6", "med", "tylenol", 6.6),
+    e("s7", "feeding", "right", 7.8, { end: at(7.5), confidence: 3 }),
+    e("s8", "diaper", "both", 7.4),
+  ]
+}
+
 class DemoBackend implements Backend {
   private read(): LogEvent[] {
     try {
-      return JSON.parse(localStorage.getItem(DEMO_KEY) || "[]")
+      const raw = localStorage.getItem(DEMO_KEY)
+      if (raw === null) return sampleEvents()
+      return JSON.parse(raw)
     } catch {
-      return []
+      return sampleEvents()
     }
   }
   private write(events: LogEvent[]) {
