@@ -73,29 +73,39 @@ class RemoteBackend implements Backend {
 
 const DEMO_KEY = "ct.demo.events"
 
-/** A believable morning so the demo opens with something to look at. */
+/** A believable week of entries so the demo, and its reports, open with something to look at. */
 function sampleEvents(): LogEvent[] {
   const H = 3_600_000
   const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * H).toISOString()
-  const e = (id: string, type: LogEvent["type"], kind: string, h: number, extra: Partial<LogEvent> = {}): LogEvent => ({
-    id,
-    type,
-    kind,
-    start: at(h),
-    by: "Demo",
-    createdAt: at(h),
-    ...extra,
-  })
-  return [
-    e("s1", "feeding", "left", 2.3, { end: at(2.0), confidence: 4 }),
-    e("s2", "diaper", "wet", 1.9),
-    e("s3", "med", "ibuprofen", 2.6),
-    e("s4", "feeding", "formula", 5.1, { end: at(4.9), amountStartMl: 60, amountEndMl: 15 }),
-    e("s5", "diaper", "stool", 4.8),
-    e("s6", "med", "tylenol", 6.6),
-    e("s7", "feeding", "right", 7.8, { end: at(7.5), confidence: 3 }),
-    e("s8", "diaper", "both", 7.4),
-  ]
+  // Small deterministic jitter so the week looks lived-in but the same on every load.
+  let seed = 7
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const people = ["Mom", "Dad", "Grandma"]
+  const events: LogEvent[] = []
+  let n = 0
+  const add = (type: LogEvent["type"], kind: string, h: number, extra: Partial<LogEvent> = {}) =>
+    events.push({ id: `s${n++}`, type, kind, start: at(h), by: people[n % 3], createdAt: at(h), ...extra })
+
+  const sides = ["left", "right"]
+  let side = 0
+  for (let h = 2.3; h < 7 * 24; h += 2.2 + rand() * 1.4) {
+    const r = rand()
+    if (r < 0.7) {
+      const mins = 12 + Math.round(rand() * 14)
+      add("feeding", sides[side++ % 2], h, { end: at(h - mins / 60), confidence: 2 + Math.round(rand() * 3) })
+    } else {
+      const offered = 60 + Math.round(rand() * 3) * 15
+      add("feeding", r < 0.88 ? "formula" : "expressed", h, {
+        end: at(h - 0.2),
+        amountStartMl: offered,
+        amountEndMl: Math.round(rand() * 3) * 5,
+      })
+    }
+    const d = rand()
+    add("diaper", d < 0.55 ? "wet" : d < 0.75 ? "both" : d < 0.88 ? "stool" : "dry", h - 0.4)
+  }
+  for (let h = 2.6, i = 0; h < 4 * 24; h += 4 + rand() * 1.5, i++) add("med", i % 2 ? "tylenol" : "ibuprofen", h)
+  return events
 }
 
 class DemoBackend implements Backend {

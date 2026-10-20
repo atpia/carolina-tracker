@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from "react"
-import { CloudOff, History as HistoryIcon, House, RefreshCw, Settings as SettingsIcon, UserRound } from "lucide-react"
+import {
+  ChartColumn,
+  CloudOff,
+  History as HistoryIcon,
+  House,
+  RefreshCw,
+  Settings as SettingsIcon,
+  UserRound,
+} from "lucide-react"
 
 import { Dashboard } from "@/components/dashboard"
 import { EntrySheet, type Draft } from "@/components/entry-sheet"
 import { History } from "@/components/history"
+import { Reports } from "@/components/reports"
 import { SettingsView, type Theme } from "@/components/settings-view"
 import { SetupScreen } from "@/components/setup-screen"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -151,6 +160,14 @@ function Tracker({
             onLoadMore={tracker.loadMore}
           />
         </TabsContent>
+        <TabsContent value="reports" className="min-w-0">
+          <Reports
+            events={tracker.events}
+            unit={unit}
+            babyName={tracker.settings.babyName}
+            onEnsureDays={tracker.ensureDays}
+          />
+        </TabsContent>
         <TabsContent value="settings">
           <SettingsView
             user={tracker.user}
@@ -170,6 +187,7 @@ function Tracker({
         <TabsList className="mx-auto flex h-auto w-full max-w-lg justify-around rounded-none bg-transparent p-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <NavItem value="now" icon={<House />} label="Now" />
           <NavItem value="history" icon={<HistoryIcon />} label="History" />
+          <NavItem value="reports" icon={<ChartColumn />} label="Reports" />
           <NavItem value="settings" icon={<SettingsIcon />} label="Settings" />
         </TabsList>
       </nav>

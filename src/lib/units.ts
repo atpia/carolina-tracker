@@ -14,5 +14,5 @@ export function fromDisplay(value: number | undefined, unit: Unit) {
 
 export function formatAmount(ml: number | undefined, unit: Unit) {
   const v = toDisplay(ml, unit)
-  return v === undefined ? "" : `${v} ${unit}`
+  return v === undefined ? "" : `${v.toLocaleString()} ${unit}`
 }

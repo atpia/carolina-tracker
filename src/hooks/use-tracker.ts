@@ -47,6 +47,9 @@ export function useTracker(conn: Connection) {
     }
   }, [refresh])
 
+  /** Make sure entries at least this many days back are loaded. */
+  const ensureDays = useCallback((n: number) => setDays((d) => Math.max(d, Math.ceil(n))), [])
+
   const save = useCallback(
     async (event: LogEvent) => {
       const previous = events
@@ -93,6 +96,7 @@ export function useTracker(conn: Connection) {
     error,
     days,
     loadMore: () => setDays((d) => d + 14),
+    ensureDays,
     refresh,
     save,
     remove,

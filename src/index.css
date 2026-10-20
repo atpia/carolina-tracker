@@ -29,6 +29,9 @@
   --color-feed: var(--feed);
   --color-diaper: var(--diaper);
   --color-med: var(--med);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
 }
 
 :root {
@@ -56,6 +59,10 @@
   --feed: oklch(0.52 0.18 355);
   --diaper: oklch(0.5 0.14 245);
   --med: oklch(0.5 0.13 150);
+  /* Chart series, from a colorblind-checked categorical palette (blue, orange, aqua). */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
 }
 
 .dark {
@@ -82,6 +89,9 @@
   --feed: oklch(0.8 0.12 355);
   --diaper: oklch(0.8 0.1 245);
   --med: oklch(0.8 0.13 150);
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
 }
 
 @layer base {
