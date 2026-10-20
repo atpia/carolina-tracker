@@ -21,7 +21,14 @@ export function DateTimeField({
 }) {
   return (
     <div className="grid gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <div className="flex h-5 items-center justify-between">
+        <Label htmlFor={id}>{label}</Label>
+        {clearable && value && (
+          <Button type="button" variant="link" size="sm" className="text-muted-foreground h-5 px-0" onClick={() => onChange("")}>
+            <X /> Clear
+          </Button>
+        )}
+      </div>
       <div className="flex gap-2">
         <Input
           id={id}
@@ -34,11 +41,6 @@ export function DateTimeField({
         <Button type="button" variant="outline" className="h-10" onClick={() => onChange(new Date().toISOString())}>
           Now
         </Button>
-        {clearable && value && (
-          <Button type="button" variant="ghost" size="icon" className="size-10" aria-label={`Clear ${label.toLowerCase()}`} onClick={() => onChange("")}>
-            <X />
-          </Button>
-        )}
       </div>
     </div>
   )
