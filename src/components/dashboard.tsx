@@ -49,7 +49,12 @@ export function Dashboard({
 
   return (
     <div className="grid gap-4">
-      {status.activeFeed && <ActiveFeed event={status.activeFeed} now={now} onOpen={onOpen} onSave={onSave} />}
+      {status.activeFeed &&
+        (status.activeFeedStale ? (
+          <ForgottenFeed event={status.activeFeed} now={now} onOpen={onOpen} />
+        ) : (
+          <ActiveFeed event={status.activeFeed} now={now} onOpen={onOpen} onSave={onSave} />
+        ))}
       <FeedingCard status={status} now={now} unit={unit} onOpen={onOpen} />
       <DiaperCard status={status} now={now} onOpen={onOpen} quickLog={quickLog} />
       <MedCard status={status} now={now} onOpen={onOpen} quickLog={quickLog} />
@@ -96,6 +101,28 @@ function ActiveFeed({
         </Button>
         <Button size="lg" variant="outline" onClick={() => onOpen({ ...event, edit: true })}>
           <Pencil /> Edit
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** A timer left running for hours: ask for the real finish time rather than stopping it now. */
+function ForgottenFeed({ event, now, onOpen }: { event: LogEvent; now: number; onOpen: (draft: Draft) => void }) {
+  return (
+    <Card className="border-destructive/40 bg-destructive/10 gap-3">
+      <CardHeader>
+        <CardDescription className="text-destructive font-medium">Feeding timer still running</CardDescription>
+        <CardTitle className="text-xl">
+          {eventTitle(event)} started {formatClock(event.start)} ({relative(t(event.start), now)})
+        </CardTitle>
+        <p className="text-muted-foreground text-sm">
+          It looks like it was never stopped. Add when the feed really ended so the next feeding window is right.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <Button size="lg" className="w-full" onClick={() => onOpen({ ...event, edit: true })}>
+          <Pencil /> Set finish time
         </Button>
       </CardContent>
     </Card>
@@ -207,7 +234,7 @@ function DiaperCard({
   onOpen: (draft: Draft) => void
   quickLog: (partial: Pick<LogEvent, "type" | "kind">, message: string) => void
 }) {
-  const { lastChange, lastCheck, nextCheck } = status
+  const { lastChange, lastCheck, lastWet, lastStool, nextCheck } = status
   const due = nextCheck !== undefined && now >= nextCheck
   const headline = !nextCheck
     ? "No diaper checks yet"
@@ -249,6 +276,16 @@ function DiaperCard({
             <span className="font-medium">Last change: {eventTitle(lastChange)}</span> at{" "}
             {formatClock(lastChange.start)} ({relative(t(lastChange.start), now)})
           </button>
+        )}
+        {(lastWet || lastStool) && (
+          <p className="text-muted-foreground -mt-1 text-sm">
+            {[
+              lastWet && `Last wet ${relative(t(lastWet.start), now)}`,
+              lastStool && `Last stool ${relative(t(lastStool.start), now)}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
         )}
         <div className="grid grid-cols-2 gap-2">
           {DIAPER_BUTTONS.map(({ kind, label, toast }) => {

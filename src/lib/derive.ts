@@ -21,10 +21,14 @@ function latest(events: LogEvent[], pred: (e: LogEvent) => boolean) {
 
 export function deriveStatus(events: LogEvent[], settings: Settings) {
   const now = Date.now()
-  const activeFeed = latest(events, (e) => e.type === "feeding" && !e.end && now - t(e.start) < 3 * HOUR)
+  const activeFeed = latest(events, (e) => e.type === "feeding" && !e.end)
+  // A timer this old was almost certainly never stopped, so the app asks about it instead of counting on.
+  const activeFeedStale = activeFeed !== undefined && now - t(activeFeed.start) >= 3 * HOUR
   const lastFeed = latest(events, (e) => e.type === "feeding")
   const lastChange = latest(events, (e) => e.type === "diaper" && e.kind !== "dry")
   const lastCheck = latest(events, (e) => e.type === "diaper")
+  const lastWet = latest(events, (e) => e.type === "diaper" && (e.kind === "wet" || e.kind === "both"))
+  const lastStool = latest(events, (e) => e.type === "diaper" && (e.kind === "stool" || e.kind === "both"))
   const lastMed = latest(events, (e) => e.type === "med")
   const lastIbuprofen = latest(events, (e) => e.type === "med" && e.kind === "ibuprofen")
   const lastTylenol = latest(events, (e) => e.type === "med" && e.kind === "tylenol")
@@ -48,12 +52,15 @@ export function deriveStatus(events: LogEvent[], settings: Settings) {
 
   return {
     activeFeed,
+    activeFeedStale,
     lastFeed,
     feedEndedAt,
     feedFrom,
     feedBy,
     lastChange,
     lastCheck,
+    lastWet,
+    lastStool,
     nextCheck,
     lastMed,
     lastIbuprofen,

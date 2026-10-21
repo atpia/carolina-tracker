@@ -76,6 +76,26 @@ function parseNum(value: string) {
   return Number.isFinite(n) ? n : undefined
 }
 
+/** Problems that would save a wrong entry. Each one blocks saving. */
+function entryErrors(e: LogEvent, mode: BottleMode): string[] {
+  const out: string[] = []
+  // A few minutes of slack so a clock that's slightly off between phones doesn't block a save.
+  const soon = Date.now() + 5 * 60_000
+  const start = new Date(e.start).getTime()
+  const end = e.type === "feeding" && e.end ? new Date(e.end).getTime() : undefined
+  if (start > soon || (end !== undefined && end > soon)) out.push("Times can't be in the future.")
+  if (end !== undefined && end < start) out.push("The finish time is before the start time.")
+  if (e.type === "feeding" && isBottle(e.kind)) {
+    const offered = e.amountStartMl
+    const left = mode === "left" ? e.amountEndMl : undefined
+    if ((offered ?? 0) < 0 || (left ?? 0) < 0) out.push("Amounts can't be negative.")
+    else if (offered !== undefined && left !== undefined && left > offered)
+      out.push("More is left over than was offered.")
+    if (offered === undefined && left !== undefined) out.push("Add how much was offered.")
+  }
+  return out
+}
+
 function KindOption({
   type,
   kind,
@@ -133,6 +153,8 @@ export function EntrySheet({
       delete out.confidence
       if (bottleMode === "percent") delete out.amountEndMl
       else delete out.percent
+      // A blank "Left over" means she finished it, as the 0 placeholder suggests.
+      if (bottleMode === "left" && out.amountStartMl !== undefined && out.amountEndMl === undefined) out.amountEndMl = 0
       // A typed amount is stored as a bottle that was finished, so every report reads it the same way.
       if (bottleMode === "amount") out.amountEndMl = 0
     } else {
@@ -155,8 +177,16 @@ export function EntrySheet({
   const bottle = event?.type === "feeding" && isBottle(event.kind)
   const drank =
     event && bottle
-      ? consumedMl({ ...event, ...(bottleMode === "percent" ? { amountEndMl: undefined } : { percent: undefined }) })
+      ? consumedMl({
+          ...event,
+          ...(bottleMode === "percent"
+            ? { amountEndMl: undefined }
+            : { percent: undefined, amountEndMl: event.amountEndMl ?? 0 }),
+        })
       : undefined
+  const errors = event ? entryErrors(event, bottleMode) : []
+  // Starting a timer drops the finish time, so only the other problems apply.
+  const timerErrors = event ? entryErrors({ ...event, end: undefined }, bottleMode) : []
   const TypeIcon = event ? TYPE_ICONS[event.type] : null
 
   return (
@@ -232,6 +262,8 @@ export function EntrySheet({
                           value={bottleMode}
                           onValueChange={(v) => {
                             if (!v) return
+                            // Carry what she drank into the typed box, not the amount offered.
+                            if (v === "amount" && bottleMode !== "amount") set({ amountStartMl: drank, amountEndMl: 0 })
                             setBottleMode(v as BottleMode)
                             if (v === "percent" && event.percent === undefined) set({ percent: 100 })
                           }}
@@ -310,6 +342,11 @@ export function EntrySheet({
                         {drank !== undefined && bottleMode !== "amount" && (
                           <FieldDescription>
                             She drank about <strong className="text-foreground">{formatAmount(drank, unit)}</strong>.
+                          </FieldDescription>
+                        )}
+                        {drank === undefined && event.end && (
+                          <FieldDescription>
+                            Without an amount, this bottle counts as 0 {unit} in totals.
                           </FieldDescription>
                         )}
                       </Field>
@@ -415,16 +452,26 @@ export function EntrySheet({
                   />
                 </Field>
               </FieldGroup>
-              <button type="submit" hidden />
+              <button type="submit" hidden disabled={errors.length > 0} />
             </form>
 
             <DrawerFooter>
-              <Button size="lg" disabled={saving} onClick={() => submit()}>
+              {errors.length > 0 && (
+                <p role="alert" className="text-destructive text-sm">
+                  {errors.join(" ")}
+                </p>
+              )}
+              <Button size="lg" disabled={saving || errors.length > 0} onClick={() => submit()}>
                 {saving && <Spinner />}
                 {saving ? "Saving" : editing ? "Save changes" : "Save"}
               </Button>
               {!editing && event.type === "feeding" && (
-                <Button size="lg" variant="outline" disabled={saving} onClick={() => submit({ end: undefined })}>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  disabled={saving || timerErrors.length > 0}
+                  onClick={() => submit({ end: undefined })}
+                >
                   <Timer /> Start timer instead
                 </Button>
               )}

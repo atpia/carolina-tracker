@@ -7,6 +7,8 @@ const DAY = 24 * HOUR
 export interface Range {
   from: number
   to: number
+  /** The range runs up to now, so stretches since the last entry are still growing. */
+  live?: boolean
 }
 
 export interface Bucket {
@@ -71,18 +73,35 @@ function findBucket(buckets: Bucket[], ms: number) {
   return undefined
 }
 
-/** Longest stretch between consecutive times, plus when it started. */
-function longestGap(times: number[]) {
+/**
+ * Longest stretch between consecutive times, plus when it started. With `until`, the stretch
+ * from the last time up to then counts too, and `ongoing` says that one was the longest.
+ */
+function longestGap(times: number[], until?: number) {
   let best = 0
   let at: number | undefined
-  for (let i = 1; i < times.length; i++) {
-    const gap = times[i] - times[i - 1]
+  let ongoing = false
+  const all = until !== undefined && times.length ? [...times, until] : times
+  for (let i = 1; i < all.length; i++) {
+    const gap = all[i] - all[i - 1]
     if (gap > best) {
       best = gap
-      at = times[i - 1]
+      at = all[i - 1]
+      ongoing = until !== undefined && i === all.length - 1
     }
   }
-  return { ms: best, at }
+  return { ms: best, at, ongoing }
+}
+
+/** Times of matching diapers in the range, starting with the last one before it so a gap can span the edge. */
+function diaperTimes(events: LogEvent[], range: Range, kinds: string[]) {
+  const times = events
+    .filter((e) => e.type === "diaper" && kinds.includes(e.kind) && t(e.start) < range.to)
+    .map((e) => t(e.start))
+    .sort((a, b) => a - b)
+  const first = times.findIndex((v) => v >= range.from)
+  if (first === -1) return times.slice(-1)
+  return times.slice(Math.max(0, first - 1))
 }
 
 export function analyze(events: LogEvent[], range: Range) {
@@ -123,6 +142,8 @@ export function analyze(events: LogEvent[], range: Range) {
 
   const wet = diapers.filter((e) => e.kind === "wet" || e.kind === "both")
   const stool = diapers.filter((e) => e.kind === "stool" || e.kind === "both")
+  // A range that ends now also counts the stretch since the last diaper, which is still growing.
+  const until = range.live ? range.to : undefined
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined)
 
   return {
@@ -148,8 +169,8 @@ export function analyze(events: LogEvent[], range: Range) {
       wetPerDay: wet.length / days,
       stool: stool.length,
       stoolPerDay: stool.length / days,
-      longestWithoutStool: longestGap(stool.map((e) => t(e.start))),
-      longestWithoutWet: longestGap(wet.map((e) => t(e.start))),
+      longestWithoutStool: longestGap(diaperTimes(events, range, ["stool", "both"]), until),
+      longestWithoutWet: longestGap(diaperTimes(events, range, ["wet", "both"]), until),
     },
   }
 }
