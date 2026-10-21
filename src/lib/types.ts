@@ -1,7 +1,9 @@
 export type EventType = "feeding" | "diaper" | "med"
 export type FeedKind = "left" | "right" | "both" | "formula" | "expressed"
 export type DiaperKind = "wet" | "stool" | "both" | "dry"
-export type MedKind = "ibuprofen" | "tylenol"
+export type MedKind = "ibuprofen" | "tylenol" | "probiotic"
+/** The pain relievers mom alternates. Probiotics are once a day and stay out of that rotation. */
+export type PainMedKind = Exclude<MedKind, "probiotic">
 
 export interface LogEvent {
   id: string
@@ -74,6 +76,11 @@ export const DIAPER_LABELS: Record<DiaperKind, string> = {
 export const MED_LABELS: Record<MedKind, string> = {
   ibuprofen: "Ibuprofen",
   tylenol: "Tylenol",
+  probiotic: "Probiotics",
+}
+
+export function isPainMed(kind: string): kind is PainMedKind {
+  return kind === "ibuprofen" || kind === "tylenol"
 }
 
 export function isBottle(kind: string) {

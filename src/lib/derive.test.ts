@@ -128,3 +128,17 @@ describe("consumedMl", () => {
     expect(consumedMl(ev("feeding", "left", 1, { amountStartMl: 60 }))).toBeUndefined()
   })
 })
+
+describe("probiotics", () => {
+  it("stays out of the pain reliever rotation", () => {
+    const s = deriveStatus([ev("med", "ibuprofen", 3), ev("med", "probiotic", 1)], DEFAULT_SETTINGS)
+    expect(s.lastMed?.kind).toBe("ibuprofen")
+    expect(s.nextMedKind).toBe("tylenol")
+    expect(s.nextMedAt).toBe(NOW - 3 * HOUR + 4 * HOUR)
+  })
+
+  it("only counts a dose taken today", () => {
+    expect(deriveStatus([ev("med", "probiotic", 13)], DEFAULT_SETTINGS).probioticToday).toBeUndefined()
+    expect(deriveStatus([ev("med", "probiotic", 2)], DEFAULT_SETTINGS).probioticToday?.kind).toBe("probiotic")
+  })
+})

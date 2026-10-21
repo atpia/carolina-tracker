@@ -139,7 +139,7 @@ export function EntrySheet({
     if (!event) return
     const out: LogEvent = { ...event, ...override }
     if (out.type !== "feeding") delete out.end
-    if (out.type !== "med") delete out.doseMg
+    if (out.type !== "med" || out.kind === "probiotic") delete out.doseMg
     if (out.type === "feeding" && isBottle(out.kind)) {
       delete out.confidence
       if (bottleMode === "percent") delete out.amountEndMl
@@ -459,17 +459,21 @@ export function EntrySheet({
                       value={event.start}
                       onChange={(v) => v && set({ start: v })}
                     />
-                    <Field>
-                      <FieldLabel htmlFor="dose">Dose (mg)</FieldLabel>
-                      <AmountInput
-                        id="dose"
-                        unit="mg"
-                        value={event.doseMg}
-                        onValueChange={(v) => set({ doseMg: v })}
-                        placeholder="Optional, e.g. 400"
-                      />
-                      <FieldDescription>Quick doses on the home screen reuse the last amount entered.</FieldDescription>
-                    </Field>
+                    {event.kind !== "probiotic" && (
+                      <Field>
+                        <FieldLabel htmlFor="dose">Dose (mg)</FieldLabel>
+                        <AmountInput
+                          id="dose"
+                          unit="mg"
+                          value={event.doseMg}
+                          onValueChange={(v) => set({ doseMg: v })}
+                          placeholder="Optional, e.g. 400"
+                        />
+                        <FieldDescription>
+                          Quick doses on the home screen reuse the last amount entered.
+                        </FieldDescription>
+                      </Field>
+                    )}
                   </>
                 )}
 

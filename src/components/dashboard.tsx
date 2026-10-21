@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { CircleStop, Pencil, Plus } from "lucide-react"
+import { CircleCheck, CircleStop, Pencil, Plus } from "lucide-react"
 import { toast } from "sonner"
 
 import type { Draft } from "@/components/entry-sheet"
@@ -19,11 +19,12 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { Separator } from "@/components/ui/separator"
 import { useNow } from "@/hooks/use-now"
 import { newId } from "@/lib/api"
 import type { Status } from "@/lib/derive"
 import { formatClock, formatClockRange, formatDuration, formatTimer, relative } from "@/lib/time"
-import { MED_LABELS, isBottle, type DiaperKind, type LogEvent, type MedKind } from "@/lib/types"
+import { MED_LABELS, isBottle, type DiaperKind, type LogEvent, type PainMedKind } from "@/lib/types"
 import { formatAmount, type Unit } from "@/lib/units"
 import { cn } from "@/lib/utils"
 
@@ -352,20 +353,20 @@ function MedCard({
   onOpen: (draft: Draft) => void
   quickLog: (partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) => Promise<void>
 }) {
-  const { nextMedKind, nextMedAt, lastMed, meds } = status
-  const [confirm, setConfirm] = useState<{ kind: MedKind; reason: string } | null>(null)
-  const other: MedKind = nextMedKind === "ibuprofen" ? "tylenol" : "ibuprofen"
+  const { nextMedKind, nextMedAt, lastMed, meds, probioticToday } = status
+  const [confirm, setConfirm] = useState<{ kind: PainMedKind; reason: string } | null>(null)
+  const other: PainMedKind = nextMedKind === "ibuprofen" ? "tylenol" : "ibuprofen"
   const ready = nextMedAt === undefined || now >= nextMedAt
   const remaining = nextMedAt ? nextMedAt - now : 0
   const NextIcon = kindIcon("med", nextMedKind)
   const OtherIcon = kindIcon("med", other)
 
   // Quick doses reuse the last mg entered for that medicine, so totals stay filled in.
-  const log = (kind: MedKind) =>
+  const log = (kind: PainMedKind) =>
     quickLog({ type: "med", kind, doseMg: meds[kind].last?.doseMg }, `${MED_LABELS[kind]} logged`)
 
   /** Why taking this medicine now would be ahead of the schedule, if it would be. */
-  function tooSoon(kind: MedKind) {
+  function tooSoon(kind: PainMedKind) {
     const same = meds[kind]
     if (same.last && same.nextAt !== undefined && now < same.nextAt)
       return `${MED_LABELS[kind]} was last taken ${relative(t(same.last.start), now)}. On this schedule it comes around again at ${formatClock(same.nextAt)}.`
@@ -374,7 +375,7 @@ function MedCard({
     return undefined
   }
 
-  function take(kind: MedKind) {
+  function take(kind: PainMedKind) {
     const reason = tooSoon(kind)
     if (reason) setConfirm({ kind, reason })
     else log(kind)
@@ -410,7 +411,7 @@ function MedCard({
       <CardContent className="grid gap-3">
         {!ready && <div className="text-med text-4xl font-semibold tabular-nums">{formatTimer(remaining)}</div>}
         <div className="text-muted-foreground grid grid-cols-2 gap-2 text-sm">
-          {(["ibuprofen", "tylenol"] as MedKind[]).map((kind) => (
+          {(["ibuprofen", "tylenol"] as PainMedKind[]).map((kind) => (
             <MedLast key={kind} label={MED_LABELS[kind]} info={meds[kind]} now={now} onOpen={onOpen} />
           ))}
         </div>
@@ -420,6 +421,12 @@ function MedCard({
         <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => take(other)}>
           <OtherIcon /> Took {MED_LABELS[other]} instead
         </Button>
+        <Separator />
+        <ProbioticRow
+          taken={probioticToday}
+          onOpen={onOpen}
+          onTake={() => quickLog({ type: "med", kind: "probiotic" }, "Probiotics logged")}
+        />
       </CardContent>
       <AlertDialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
         <AlertDialogContent>
@@ -437,6 +444,46 @@ function MedCard({
   )
 }
 
+/** Probiotics are once a day: no countdown, just whether today's has been taken. */
+function ProbioticRow({
+  taken,
+  onOpen,
+  onTake,
+}: {
+  taken?: LogEvent
+  onOpen: (draft: Draft) => void
+  onTake: () => void
+}) {
+  const Icon = kindIcon("med", "probiotic")
+  if (taken)
+    return (
+      <button
+        className="hover:bg-muted flex items-center gap-2 rounded-md px-1 py-1 text-left text-sm"
+        onClick={() => onOpen({ ...taken, edit: true })}
+      >
+        <CircleCheck className="text-med size-4 shrink-0" />
+        <span>
+          <span className="font-medium">Probiotics taken today</span>
+          <span className="text-muted-foreground">
+            {" "}
+            at {formatClock(taken.start)} by {taken.by}
+          </span>
+        </span>
+      </button>
+    )
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-sm">
+        <div className="font-medium">Probiotics not taken yet today</div>
+        <div className="text-muted-foreground text-xs">Once a day, any time</div>
+      </div>
+      <Button variant="outline" size="sm" onClick={onTake}>
+        <Icon /> Took it
+      </Button>
+    </div>
+  )
+}
+
 function MedLast({
   label,
   info,
@@ -444,7 +491,7 @@ function MedLast({
   onOpen,
 }: {
   label: string
-  info: Status["meds"][MedKind]
+  info: Status["meds"][PainMedKind]
   now: number
   onOpen: (draft: Draft) => void
 }) {

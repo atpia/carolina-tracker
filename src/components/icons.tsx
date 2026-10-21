@@ -4,6 +4,7 @@ import {
   CircleDot,
   CircleDotDashed,
   Droplets,
+  Leaf,
   Milk,
   Pill,
   PillBottle,
@@ -42,6 +43,7 @@ export const KIND_ICONS: Record<string, LucideIcon> = {
   dry: Sparkles,
   ibuprofen: Pill,
   tylenol: Tablets,
+  probiotic: Leaf,
 }
 
 /** "both" means both breasts for a feeding and wet + stool for a diaper. */

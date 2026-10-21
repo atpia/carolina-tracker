@@ -64,6 +64,7 @@ The script checks every 5 minutes and posts once for each of these:
 - ⏱️ a feeding timer has been running for 3 hours, in case someone forgot to stop it
 - 🧷 a diaper check is due: 2 hours after a wet or stool diaper, or 1 hour after a check that found it clean
 - 💊 mom's next dose is allowed, naming which medication is next
+- 🌿 mom's probiotics haven't been logged yet that day, at the hour in `probioticReminderHour` (20, so 8 PM, by default; type `off` to skip it). The hour uses the script's time zone, set under Project Settings in the Apps Script editor
 
 Times in the messages show in each person's own time zone. Turn individual reminders on or off with `remindFeeding`, `remindDiaper` and `remindMeds`. Set `announceEntries` to `TRUE` if you also want a message every time someone logs something.
 

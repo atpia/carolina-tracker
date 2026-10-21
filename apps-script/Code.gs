@@ -27,6 +27,7 @@ var DEFAULT_SETTINGS = [
   ['remindFeeding', true, 'Discord alert when the feeding window opens and when it is overdue'],
   ['remindDiaper', true, 'Discord alert when a diaper check is due'],
   ['remindMeds', true, "Discord alert when mom's next dose is due"],
+  ['probioticReminderHour', 20, "Hour of the day (0-23, so 20 is 8 PM) for a Discord nudge if mom's probiotics are not logged yet that day. Type off for none"],
   ['announceEntries', false, 'Also post every new entry to Discord'],
 ];
 var DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
@@ -38,7 +39,7 @@ var EDITABLE_FIELDS = [
 var KINDS = {
   feeding: { left: true, right: true, both: true, formula: true, expressed: true },
   diaper: { wet: true, stool: true, both: true, dry: true },
-  med: { ibuprofen: true, tylenol: true },
+  med: { ibuprofen: true, tylenol: true, probiotic: true },
 };
 
 // ---------------------------------------------------------------------------
@@ -416,7 +417,7 @@ function deleteEvent_(id, user) {
 var LABELS = {
   left: 'Left breast', right: 'Right breast', both: 'Both breasts', formula: 'Formula', expressed: 'Expressed milk',
   wet: 'Wet diaper', stool: 'Stool diaper', dry: 'Diaper check (clean)',
-  ibuprofen: 'Ibuprofen', tylenol: 'Tylenol',
+  ibuprofen: 'Ibuprofen', tylenol: 'Tylenol', probiotic: 'Probiotics',
 };
 
 function label_(e) {
@@ -545,12 +546,26 @@ function checkReminders() {
   }
 
   if (truthy_(s.remindMeds)) {
-    var med = latest_(events, function (e) { return e.type === 'med'; });
+    // Probiotics are once a day and stay out of the ibuprofen and Tylenol rotation.
+    var med = latest_(events, function (e) { return e.type === 'med' && e.kind !== 'probiotic'; });
     if (med) {
       var tookAt = new Date(med.start).getTime();
       var next = med.kind === 'ibuprofen' ? 'Tylenol' : 'Ibuprofen';
       once('med:' + med.id, tookAt + Number(s.medIntervalH) * H,
         '💊 Mom can take **' + next + '** now. Last dose was ' + label_(med) + ' at ' + ts_(tookAt) + '.');
+    }
+  }
+
+  var probioticHour = String(s.probioticReminderHour).trim().toLowerCase();
+  if (probioticHour !== 'off' && probioticHour !== 'none') {
+    var tz = Session.getScriptTimeZone();
+    var today = Utilities.formatDate(new Date(now), tz, 'yyyy-MM-dd');
+    var hourNow = Number(Utilities.formatDate(new Date(now), tz, 'H'));
+    var taken = events.some(function (e) {
+      return e.type === 'med' && e.kind === 'probiotic' && Utilities.formatDate(new Date(e.start), tz, 'yyyy-MM-dd') === today;
+    });
+    if (!taken && hourNow >= Number(probioticHour)) {
+      once('probiotic:' + today, now, '🌿 Probiotics have not been logged today. Has mom taken them?');
     }
   }
 

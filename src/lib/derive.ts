@@ -1,5 +1,5 @@
 import { HOUR, startOfToday } from "./time"
-import { isBottle, type LogEvent, type MedKind, type Settings } from "./types"
+import { isBottle, isPainMed, type LogEvent, type PainMedKind, type Settings } from "./types"
 
 const t = (iso: string) => new Date(iso).getTime()
 
@@ -38,7 +38,7 @@ export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.
   const lastCheck = latest(events, (e) => e.type === "diaper")
   const lastWet = latest(events, (e) => e.type === "diaper" && (e.kind === "wet" || e.kind === "both"))
   const lastStool = latest(events, (e) => e.type === "diaper" && (e.kind === "stool" || e.kind === "both"))
-  const lastMed = latest(events, (e) => e.type === "med")
+  const lastMed = latest(events, (e) => e.type === "med" && isPainMed(e.kind))
   const lastIbuprofen = latest(events, (e) => e.type === "med" && e.kind === "ibuprofen")
   const lastTylenol = latest(events, (e) => e.type === "med" && e.kind === "tylenol")
 
@@ -50,24 +50,26 @@ export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.
   const nextCheck = lastCheck
     ? t(lastCheck.start) + (lastCheck.kind === "dry" ? settings.diaperAfterCleanH : settings.diaperAfterChangeH) * HOUR
     : undefined
-  const nextMedKind: MedKind = lastMed?.kind === "ibuprofen" ? "tylenol" : "ibuprofen"
+  const nextMedKind: PainMedKind = lastMed?.kind === "ibuprofen" ? "tylenol" : "ibuprofen"
   const nextMedAt = lastMed ? t(lastMed.start) + settings.medIntervalH * HOUR : undefined
   // Alternating means each medicine comes around every other dose.
   const sameMedGap = 2 * settings.medIntervalH * HOUR
   const medDay = events.filter((e) => e.type === "med" && now - t(e.start) < 24 * HOUR)
   const meds = Object.fromEntries(
-    (["ibuprofen", "tylenol"] as MedKind[]).map((kind) => {
+    (["ibuprofen", "tylenol"] as PainMedKind[]).map((kind) => {
       const last = kind === "ibuprofen" ? lastIbuprofen : lastTylenol
       const doses = medDay.filter((e) => e.kind === kind)
       const mg = doses.reduce((sum, e) => sum + (e.doseMg ?? 0), 0)
       return [kind, { last, nextAt: last ? t(last.start) + sameMedGap : undefined, doses24h: doses.length, mg24h: mg }]
     }),
-  ) as Record<MedKind, { last?: LogEvent; nextAt?: number; doses24h: number; mg24h: number }>
+  ) as Record<PainMedKind, { last?: LogEvent; nextAt?: number; doses24h: number; mg24h: number }>
 
   const since = startOfToday(now)
   const today = events.filter((e) => t(e.start) >= since)
   const feeds = today.filter((e) => e.type === "feeding")
   const diapers = today.filter((e) => e.type === "diaper")
+  // Probiotics are once per calendar day, so the only question is whether today's has been taken.
+  const probioticToday = latest(today, (e) => e.type === "med" && e.kind === "probiotic")
   const bottleMl = feeds.reduce((sum, e) => sum + (consumedMl(e) ?? 0), 0)
 
   return {
@@ -89,6 +91,7 @@ export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.
     nextMedKind,
     nextMedAt,
     meds,
+    probioticToday,
     targets: { feeds: settings.targetFeedsPerDay, wet: settings.targetWetPerDay },
     today: {
       feeds: feeds.length,

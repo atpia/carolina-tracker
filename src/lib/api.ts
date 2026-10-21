@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, type LogEvent, type Session } from "./types"
+import { startOfToday } from "./time"
 
 export interface Connection {
   /** Apps Script web app URL, or "demo" for a local-only trial. */
@@ -185,6 +186,9 @@ function sampleEvents(): LogEvent[] {
     add("diaper", d < 0.55 ? "wet" : d < 0.75 ? "both" : d < 0.88 ? "stool" : "dry", h - 0.4)
   }
   for (let h = 2.6, i = 0; h < 4 * 24; h += 4 + rand() * 1.5, i++) add("med", i % 2 ? "tylenol" : "ibuprofen", h)
+  // A morning probiotic on each past day, with today's still to take.
+  const sinceMidnight = (Date.now() - startOfToday()) / H
+  for (let d = 1; d < 7; d++) add("med", "probiotic", sinceMidnight + 24 * (d - 1) + 15 - rand())
   return events
 }
 
