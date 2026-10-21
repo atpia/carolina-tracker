@@ -260,9 +260,15 @@ function rowToEvent_(row) {
   EVENT_HEADERS.forEach(function (h, i) {
     var v = row[i];
     if (v === '' || v === null) return;
-    if (DATE_FIELDS[h]) v = v instanceof Date ? v.toISOString() : new Date(v).toISOString();
-    else if (NUMBER_FIELDS[h]) v = Number(v);
-    else if (h !== 'deleted') v = String(v);
+    // A hand-typed cell that isn't a date or a number is left out rather than breaking every phone's list.
+    if (DATE_FIELDS[h]) {
+      var ms = time_(v);
+      if (!ms) return;
+      v = new Date(ms).toISOString();
+    } else if (NUMBER_FIELDS[h]) {
+      v = Number(v);
+      if (isNaN(v)) return;
+    } else if (h !== 'deleted') v = String(v);
     e[h] = v;
   });
   return e;
@@ -297,11 +303,16 @@ function listEvents_(days) {
     var start = Math.max(2, end - SCAN_CHUNK + 1);
     var rows = sheet.getRange(start, 1, end - start + 1, EVENT_HEADERS.length).getValues();
     var recent = false;
-    rows.forEach(function (row) {
+    rows.forEach(function (row, i) {
       var touched = Math.max(time_(row[created]), time_(row[updated]));
       if (touched >= since || !touched) recent = true;
       var e = rowToEvent_(row);
-      if (!e.id || truthy_(e.deleted) || new Date(e.start).getTime() < since) return;
+      if (!e.id || truthy_(e.deleted)) return;
+      if (!e.start) {
+        Logger.log('Skipping Events row ' + (start + i) + ': the start time is not a date.');
+        return;
+      }
+      if (new Date(e.start).getTime() < since) return;
       delete e.deleted;
       out.push(e);
     });
