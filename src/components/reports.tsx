@@ -20,6 +20,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -31,6 +32,12 @@ import type { LogEvent } from "@/lib/types"
 import { formatAmount, toDisplay, type Unit } from "@/lib/units"
 
 type Preset = "24h" | "7d" | "custom"
+
+/** The chosen range. The app holds it, so it survives switching tabs. */
+export interface ReportRange {
+  preset: Preset
+  custom?: DateRange
+}
 
 const feedChart = {
   breast: { label: "Breast", color: "var(--chart-1)" },
@@ -63,15 +70,22 @@ export function Reports({
   events,
   unit,
   babyName,
+  loadedDays,
   onEnsureDays,
+  selected,
+  onSelect,
 }: {
   events: LogEvent[]
   unit: Unit
   babyName: string
+  /** How many days back the app has loaded so far. */
+  loadedDays: number
   onEnsureDays: (days: number) => void
+  selected: ReportRange
+  onSelect: (range: ReportRange) => void
 }) {
-  const [preset, setPreset] = useState<Preset>("7d")
-  const [custom, setCustom] = useState<DateRange | undefined>()
+  const { preset, custom } = selected
+  const setPreset = (p: Preset) => onSelect({ ...selected, preset: p })
   const [pickerOpen, setPickerOpen] = useState(false)
 
   // Ticks every minute so a range that ends "now" keeps up while the tab stays open.
@@ -92,6 +106,9 @@ export function Reports({
       toast.error("Couldn't copy on this device.")
     }
   }
+
+  // Stats for older dates would be partial until those days arrive.
+  const loadingOlder = Date.now() - loadedDays * 24 * HOUR > range.from
 
   const hourly = bucketSize(range) === "hour"
   const unitLabel = hourly ? "hour" : "day"
@@ -121,10 +138,7 @@ export function Reports({
               <Calendar
                 mode="range"
                 selected={custom}
-                onSelect={(r) => {
-                  setCustom(r)
-                  setPreset("custom")
-                }}
+                onSelect={(r) => onSelect({ preset: "custom", custom: r })}
                 disabled={{ after: new Date() }}
                 defaultMonth={custom?.from}
                 autoFocus
@@ -138,7 +152,15 @@ export function Reports({
           </Popover>
         </ToggleGroup>
         <div className="flex items-center justify-between gap-2">
-          <p className="text-muted-foreground text-sm">{rangeLabel(range)}</p>
+          <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
+            {loadingOlder ? (
+              <>
+                <Spinner className="size-3.5" /> Loading older entries
+              </>
+            ) : (
+              rangeLabel(range)
+            )}
+          </p>
           <Button variant="outline" size="sm" onClick={copySummary}>
             <ClipboardCopy /> Copy summary
           </Button>

@@ -14,6 +14,7 @@ import { toast } from "sonner"
 import { Dashboard } from "@/components/dashboard"
 import { EntrySheet, type Draft } from "@/components/entry-sheet"
 import { ErrorBoundary } from "@/components/error-boundary"
+import type { ReportRange } from "@/components/reports"
 import { History } from "@/components/history"
 import { SettingsView, type Theme } from "@/components/settings-view"
 import { SetupScreen } from "@/components/setup-screen"
@@ -118,6 +119,7 @@ function Tracker({
   const [unit, setUnit] = useLocalState<Unit>("ct.unit", "ml")
   const [tab, setTab] = useLocalState("ct.tab", "now")
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [reportRange, setReportRange] = useState<ReportRange>({ preset: "7d" })
   useWarmReports()
   // A one-minute tick keeps "today", forgotten timers and 24-hour med counts current even when no new data arrives.
   const minute = useNow(60_000)
@@ -225,7 +227,10 @@ function Tracker({
                 events={tracker.events}
                 unit={unit}
                 babyName={tracker.settings.babyName}
+                loadedDays={tracker.loadedDays}
                 onEnsureDays={tracker.ensureDays}
+                selected={reportRange}
+                onSelect={setReportRange}
               />
             </Suspense>
           </ErrorBoundary>
