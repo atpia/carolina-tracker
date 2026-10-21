@@ -61,7 +61,7 @@ export function Dashboard({
   onSave: (event: LogEvent) => Promise<void>
   onRemove: (id: string) => Promise<void>
   /** Shown when the Sheet has a Home Assistant reading light set up. */
-  light?: { initial?: LightState; onSet: (light: LightState) => Promise<LightState> }
+  light?: { onGet: () => Promise<LightState>; onSet: (light: LightState) => Promise<LightState> }
 }) {
   const now = useNow(1000)
 
@@ -95,7 +95,7 @@ export function Dashboard({
           />
         ),
       )}
-      {light && <LightCard initial={light.initial} onSet={light.onSet} />}
+      {light && <LightCard onGet={light.onGet} onSet={light.onSet} />}
       <MedsDue status={status} babyName={babyName} now={now} quickLog={quickLog} />
       <FeedingCard status={status} now={now} unit={unit} onOpen={onOpen} quickLog={quickLog} />
       <DiaperCard status={status} babyName={babyName} now={now} onOpen={onOpen} quickLog={quickLog} />

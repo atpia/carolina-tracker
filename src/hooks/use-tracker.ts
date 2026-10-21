@@ -267,6 +267,7 @@ export function useTracker(conn: Connection) {
 
   const lightAlert = useCallback((id: string) => backend.lightAlert(id), [backend])
   const setLight = useCallback((light: LightState) => backend.setLight(light), [backend])
+  const getLight = useCallback(() => backend.getLight(), [backend])
 
   // Fill gaps from defaults so an older Sheet script without newer settings still works.
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ...definedOnly(session?.settings) }), [session])
@@ -289,8 +290,7 @@ export function useTracker(conn: Connection) {
     save,
     remove,
     lightAlert,
-    /** The reading light as last set from the app, if this Sheet's script knows about it. */
-    light: session?.light,
+    getLight,
     setLight,
   }
 }

@@ -169,49 +169,26 @@ Nothing changes on the phones. Once they reload, the app's **Settings → Schedu
 
 ## 7. Reading light switch in the app (optional)
 
-The app's **Now** tab can show a **Reading light** card with an on/off button and a brightness slider, for turning the light on during a night feed without leaving the app. It goes through the Sheet to a second Home Assistant webhook, so the phones never hold anything that reaches Home Assistant directly. Moving the slider while the light is off turns it on at that brightness.
+The app's **Now** tab can show a **Reading light** card with an on/off button and a brightness slider, for turning the light on during a night feed without leaving the app. Moving the slider while the light is off turns it on at that brightness. The card shows the light's real state, including changes made at the wall switch or in Home Assistant, and checks again every 30 seconds while the app is open.
 
-The card shows the light as it was last set from the app. Home Assistant's webhooks can't answer with the light's real state, so a change made at the wall switch or in Home Assistant doesn't show on the card until someone uses it again.
+The Sheet talks to Home Assistant's API with a long-lived access token. That token can do anything in Home Assistant, so:
+- it's saved in the script's own storage, not in a Sheet cell, so people the Sheet is shared with can't read it
+- it never goes to the phones
+- the app can only switch and dim the one light in Settings → `readingLight`
 
 ### In Home Assistant
 
-Make a second automation the same way as in section 6 (**Create new automation → ⋮ → Edit in YAML**), paste this, and give it its own long, random `webhook_id`. It must be different from the flash one, or every tap would flash the light too.
+1. Click your name at the bottom left, open the **Security** tab, and under **Long-lived access tokens** click **Create token**. Name it **Baby tracker** and copy it. Home Assistant shows it only once.
 
-```yaml
-alias: Baby tracker reading light
-description: The reading light switch and brightness slider in the baby tracker app
-triggers:
-  - trigger: webhook
-    webhook_id: carolina-reading-light-CHANGE-THIS-TO-SOMETHING-RANDOM
-    allowed_methods:
-      - POST
-    local_only: false
-actions:
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.json.on }}"
-        sequence:
-          - action: light.turn_on
-            target:
-              entity_id: light.living_room_reading_light
-            data:
-              brightness_pct: "{{ trigger.json.brightness }}"
-    default:
-      - action: light.turn_off
-        target:
-          entity_id: light.living_room_reading_light
-mode: restart
-```
-
-The app sends `on` (`true` or `false`), `brightness` (1 to 100) and `by` (who tapped it).
+Nothing else is needed in Home Assistant: no automation for this one.
 
 ### In the Sheet
 
-1. Paste the latest [`apps-script/Code.gs`](apps-script/Code.gs), deploy a new version, and run **Baby tracker → 1. Set up tabs and codes**, the same as in section 6. It adds the `haLightWebhookUrl` row.
-2. Paste the second webhook's URL (your Nabu Casa address, `/api/webhook/`, then this automation's `webhook_id`) into `haLightWebhookUrl`.
+1. Paste the latest [`apps-script/Code.gs`](apps-script/Code.gs), deploy a new version, and run **Baby tracker → 1. Set up tabs and codes**, the same as in section 6. It adds the `haUrl` and `readingLight` rows.
+2. Put your Nabu Casa address (for example `https://abcdefghijklmnop.ui.nabu.casa`, without `/api/webhook/…`) into `haUrl`. `readingLight` is already `light.living_room_reading_light`; change it for a different light.
+3. Click **Baby tracker → Save Home Assistant token**, paste the token, and click **OK**. It answers with the light's current state, or says what's wrong.
 
-Reload the app on each phone and the card appears on the **Now** tab. Clear `haLightWebhookUrl` to hide it again.
+Reload the app on each phone and the card appears on the **Now** tab. To take the light out of the app, run **Save Home Assistant token** again with an empty box. To cut off the token entirely, delete it in Home Assistant under **Security → Long-lived access tokens**.
 
 ## Changing things later
 
