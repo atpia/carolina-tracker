@@ -260,6 +260,7 @@ function Tracker({
         onDelete={tracker.remove}
         user={tracker.user}
         unit={unit}
+        demo={conn.api === "demo"}
       />
     </Tabs>
   )

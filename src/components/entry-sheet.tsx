@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { Fragment, useState } from "react"
 import { Annoyed, Frown, Laugh, Meh, Smile, Timer, Trash2, type LucideIcon } from "lucide-react"
 
 import { AmountInput } from "@/components/amount-input"
@@ -101,6 +101,7 @@ export function EntrySheet({
   onDelete,
   user,
   unit,
+  demo,
 }: {
   draft: Draft | null
   onClose: () => void
@@ -108,19 +109,27 @@ export function EntrySheet({
   onDelete: (id: string) => void
   user: string
   unit: Unit
+  /** Demo entries live on this phone only, so there's no Sheet copy to mention. */
+  demo?: boolean
 }) {
   const [event, setEvent] = useState<LogEvent | null>(null)
   const [bottleMode, setBottleMode] = useState<BottleMode>("left")
   const [saving, setSaving] = useState(false)
-  const editing = Boolean(draft?.edit)
+  // The draft the form was last filled from, and a key that gives each opening a fresh form.
+  const [opened, setOpened] = useState<{ draft: Draft; key: number } | null>(null)
+  // Whether someone changed the start time, so "Start timer instead" knows to keep it.
+  const [startEdited, setStartEdited] = useState(false)
+  const editing = Boolean(opened?.draft.edit)
 
-  useEffect(() => {
-    if (!draft) return
+  // Fill the form while rendering rather than in an effect, so reopening never flashes the previous entry.
+  if (draft && draft !== opened?.draft) {
     const { edit, ...rest } = draft
     const e = edit ? (rest as LogEvent) : blank(rest, user)
+    setOpened({ draft, key: (opened?.key ?? 0) + 1 })
     setEvent(e)
     setBottleMode(e.percent !== undefined && e.amountEndMl === undefined ? "percent" : "left")
-  }, [draft, user])
+    setStartEdited(false)
+  }
 
   const set = (patch: Partial<LogEvent>) => setEvent((e) => (e ? { ...e, ...patch } : e))
 
@@ -166,14 +175,16 @@ export function EntrySheet({
       : undefined
   const errors = event ? entryErrors(event, bottleMode) : []
   // Starting a timer drops the finish time, so only the other problems apply.
-  const timerErrors = event ? entryErrors({ ...event, end: undefined }, bottleMode) : []
+  const timerErrors = event
+    ? entryErrors({ ...event, end: undefined, ...(startEdited ? {} : { start: new Date().toISOString() }) }, bottleMode)
+    : []
   const TypeIcon = event ? TYPE_ICONS[event.type] : null
 
   return (
     <Drawer open={open} onOpenChange={(o) => !o && onClose()} repositionInputs={false}>
       <DrawerContent>
         {event && TypeIcon && (
-          <>
+          <Fragment key={opened?.key}>
             <DrawerHeader className="text-left group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
               <DrawerTitle className="flex items-center gap-2">
                 <TypeIcon className="size-5" />
@@ -219,7 +230,11 @@ export function EntrySheet({
                       id="start"
                       label="Started"
                       value={event.start}
-                      onChange={(v) => v && set({ start: v })}
+                      onChange={(v) => {
+                        if (!v) return
+                        set({ start: v })
+                        setStartEdited(true)
+                      }}
                     />
                     <DateTimeField
                       id="end"
@@ -246,7 +261,10 @@ export function EntrySheet({
                                 type="button"
                                 size="sm"
                                 variant={current ? "default" : "outline"}
-                                onClick={() => set({ start: new Date(end - mins * 60_000).toISOString() })}
+                                onClick={() => {
+                                  set({ start: new Date(end - mins * 60_000).toISOString() })
+                                  setStartEdited(true)
+                                }}
                               >
                                 {mins} min
                               </Button>
@@ -488,7 +506,10 @@ export function EntrySheet({
                   size="lg"
                   variant="outline"
                   disabled={saving || timerErrors.length > 0}
-                  onClick={() => submit({ end: undefined })}
+                  // The timer starts now, not when the drawer opened, unless a start time was picked.
+                  onClick={() =>
+                    submit({ end: undefined, ...(startEdited ? {} : { start: new Date().toISOString() }) })
+                  }
                 >
                   <Timer /> Start timer instead
                 </Button>
@@ -504,7 +525,9 @@ export function EntrySheet({
                     <AlertDialogHeader>
                       <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        It disappears from the app for everyone. A copy stays in the Google Sheet, marked as deleted.
+                        {demo
+                          ? "It disappears from the app."
+                          : "It disappears from the app for everyone. A copy stays in the Google Sheet, marked as deleted."}
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -523,7 +546,7 @@ export function EntrySheet({
                 </AlertDialog>
               )}
             </DrawerFooter>
-          </>
+          </Fragment>
         )}
       </DrawerContent>
     </Drawer>
