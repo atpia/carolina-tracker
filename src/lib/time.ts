@@ -52,8 +52,8 @@ export function fromLocalInput(value: string) {
   return value ? new Date(value).toISOString() : ""
 }
 
-export function startOfToday() {
-  const d = new Date()
+export function startOfToday(now = Date.now()) {
+  const d = new Date(now)
   d.setHours(0, 0, 0, 0)
   return d.getTime()
 }

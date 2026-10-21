@@ -23,6 +23,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Toaster } from "@/components/ui/sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useLocalState } from "@/hooks/use-local-state"
+import { useNow } from "@/hooks/use-now"
 import { useTracker } from "@/hooks/use-tracker"
 import { loadConnection, saveConnection, type Connection } from "@/lib/api"
 import { clearAutoReload } from "@/lib/chunk"
@@ -117,7 +118,12 @@ function Tracker({
   const [tab, setTab] = useLocalState("ct.tab", "now")
   const [draft, setDraft] = useState<Draft | null>(null)
   useWarmReports()
-  const status = useMemo(() => deriveStatus(tracker.events, tracker.settings), [tracker.events, tracker.settings])
+  // A one-minute tick keeps "today", forgotten timers and 24-hour med counts current even when no new data arrives.
+  const minute = useNow(60_000)
+  const status = useMemo(
+    () => deriveStatus(tracker.events, tracker.settings, minute),
+    [tracker.events, tracker.settings, minute],
+  )
 
   if (tracker.sessionError) {
     return (
