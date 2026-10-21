@@ -3,7 +3,7 @@ import { toast } from "sonner"
 
 import { entryName } from "@/components/describe"
 import { createBackend, isAuthError, isNetworkError, isRetryable, type Connection } from "@/lib/api"
-import { DEFAULT_SETTINGS, type LogEvent, type Session } from "@/lib/types"
+import { DEFAULT_SETTINGS, type LightState, type LogEvent, type Session } from "@/lib/types"
 
 const POLL_MS = 30_000
 const SESSION_KEY = "ct.session"
@@ -266,6 +266,7 @@ export function useTracker(conn: Connection) {
   )
 
   const lightAlert = useCallback((id: string) => backend.lightAlert(id), [backend])
+  const setLight = useCallback((light: LightState) => backend.setLight(light), [backend])
 
   // Fill gaps from defaults so an older Sheet script without newer settings still works.
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ...definedOnly(session?.settings) }), [session])
@@ -288,6 +289,9 @@ export function useTracker(conn: Connection) {
     save,
     remove,
     lightAlert,
+    /** The reading light as last set from the app, if this Sheet's script knows about it. */
+    light: session?.light,
+    setLight,
   }
 }
 

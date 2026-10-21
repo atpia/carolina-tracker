@@ -94,14 +94,15 @@ When a running breastfeeding timer passes `breastLimitMin` (15 minutes per side 
 ### In Home Assistant
 
 1. Go to **Settings → Automations & scenes → Create automation → Create new automation**, then **⋮ → Edit in YAML**.
-2. Paste this, and change `light.nursery` (three places) to your light's entity ID. Find it under **Settings → Devices & services → Entities**.
+2. Paste this. It pulses `light.living_room_reading_light` five times, from 75% down to 10% over a second each way, then puts the light back how it was (off, if it was off). For a different light, change the entity ID in all four places. Find it under **Settings → Devices & services → Entities**.
 3. Change the `webhook_id` to something long and random. Anyone with the URL can flash the light, so treat it like a password. A password manager's generator works, or add a **Webhook** trigger in the visual editor and copy the ID it makes up.
-4. **Save**.
+4. **Save**. Home Assistant may warn that `scene.before_feed_limit_flash` doesn't exist. That's expected: the first step makes it each time the automation runs.
 
 ```yaml
 alias: Breastfeeding limit light
-description: Flash the light when the baby tracker's breastfeeding timer passes the per-side limit
-mode: single
+description: >-
+  Flash the light when the baby tracker's breastfeeding timer passes the
+  per-side limit
 triggers:
   - trigger: webhook
     webhook_id: carolina-feed-limit-CHANGE-THIS-TO-SOMETHING-RANDOM
@@ -115,30 +116,33 @@ actions:
     data:
       scene_id: before_feed_limit_flash
       snapshot_entities:
-        - light.nursery
+        - light.living_room_reading_light
   - repeat:
       count: 5
       sequence:
         - action: light.turn_on
-          target:
-            entity_id: light.nursery
           data:
-            brightness_pct: 100
-            # Delete this line for a bulb that is white only.
-            color_name: red
-        - delay:
-            milliseconds: 600
-        - action: light.turn_off
+            transition: 1
+            brightness_pct: 75
           target:
-            entity_id: light.nursery
+            entity_id: light.living_room_reading_light
         - delay:
-            milliseconds: 600
+            seconds: 1
+        - action: light.turn_on
+          data:
+            brightness_pct: 10
+            transition: 1
+          target:
+            entity_id: light.living_room_reading_light
+        - delay:
+            seconds: 1
   - action: scene.turn_on
     target:
       entity_id: scene.before_feed_limit_flash
+mode: single
 ```
 
-Some lights (Philips Hue, for example) can flash on their own. For those, the `repeat` block can be swapped for a single `light.turn_on` with `flash: long`.
+The delays match the `transition` times, so each fade finishes before the next one starts. Some lights (Philips Hue, for example) can also flash on their own: the `repeat` block can be swapped for a single `light.turn_on` with `flash: long`.
 
 The webhook also sends details you can use in the automation, for example in a notification: `{{ trigger.json.side }}` ("Left breast"), `{{ trigger.json.minutes }}`, `{{ trigger.json.by }}` (who started the timer) and `{{ trigger.json.baby }}`. The test from the Sheet's menu sends `{{ trigger.json.event }}` as `test` instead of `breast_limit`, if you want the automation to tell them apart.
 
@@ -162,6 +166,52 @@ Find your Nabu Casa address under **Settings → Home Assistant Cloud → Remote
 6. Click **Baby tracker → 3. Turn on reminders (Discord and Home Assistant)**, if you haven't before, so the 5-minute check can send it when no phone has the app open. Google may ask for permission to connect to an external service.
 
 Nothing changes on the phones. Once they reload, the app's **Settings → Schedule** shows "Flash a light at the limit: Home Assistant". To turn the light off, clear `haWebhookUrl`.
+
+## 7. Reading light switch in the app (optional)
+
+The app's **Now** tab can show a **Reading light** card with an on/off button and a brightness slider, for turning the light on during a night feed without leaving the app. It goes through the Sheet to a second Home Assistant webhook, so the phones never hold anything that reaches Home Assistant directly. Moving the slider while the light is off turns it on at that brightness.
+
+The card shows the light as it was last set from the app. Home Assistant's webhooks can't answer with the light's real state, so a change made at the wall switch or in Home Assistant doesn't show on the card until someone uses it again.
+
+### In Home Assistant
+
+Make a second automation the same way as in section 6 (**Create new automation → ⋮ → Edit in YAML**), paste this, and give it its own long, random `webhook_id`. It must be different from the flash one, or every tap would flash the light too.
+
+```yaml
+alias: Baby tracker reading light
+description: The reading light switch and brightness slider in the baby tracker app
+triggers:
+  - trigger: webhook
+    webhook_id: carolina-reading-light-CHANGE-THIS-TO-SOMETHING-RANDOM
+    allowed_methods:
+      - POST
+    local_only: false
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.json.on }}"
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: light.living_room_reading_light
+            data:
+              brightness_pct: "{{ trigger.json.brightness }}"
+    default:
+      - action: light.turn_off
+        target:
+          entity_id: light.living_room_reading_light
+mode: restart
+```
+
+The app sends `on` (`true` or `false`), `brightness` (1 to 100) and `by` (who tapped it).
+
+### In the Sheet
+
+1. Paste the latest [`apps-script/Code.gs`](apps-script/Code.gs), deploy a new version, and run **Baby tracker → 1. Set up tabs and codes**, the same as in section 6. It adds the `haLightWebhookUrl` row.
+2. Paste the second webhook's URL (your Nabu Casa address, `/api/webhook/`, then this automation's `webhook_id`) into `haLightWebhookUrl`.
+
+Reload the app on each phone and the card appears on the **Now** tab. Clear `haLightWebhookUrl` to hide it again.
 
 ## Changing things later
 

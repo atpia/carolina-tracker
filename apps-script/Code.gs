@@ -31,6 +31,7 @@ var DEFAULT_SETTINGS = [
   ['probioticReminderHour', 20, "Hour of the day (0-23, so 20 is 8 PM) for a Discord nudge if mom's probiotics are not logged yet that day. Type off for none"],
   ['vitaminDReminderHour', 20, "Hour of the day (0-23) for a Discord nudge if the baby's Vitamin D is not logged yet that day. Type off for none"],
   ['announceEntries', false, 'Also post every new entry to Discord'],
+  ['haLightWebhookUrl', '', 'Home Assistant webhook URL for the reading light switch and brightness slider in the app. A different webhook from haWebhookUrl. Leave blank to hide them'],
   ['haWebhookUrl', '', 'Home Assistant webhook URL (https://….ui.nabu.casa/api/webhook/…) called when a breastfeed passes breastLimitMin, to flash a light. Leave blank for none'],
   ['calendarId', '', 'Google Calendar that appointments are copied to. Filled in by "Set up appointments calendar"'],
 ];
@@ -189,7 +190,12 @@ function doPost(e) {
 function handle_(req, user) {
   switch (req.action) {
     case 'session':
-      return { user: user, users: activeUsers_().map(function (u) { return u.name; }), settings: clientSettings_() };
+      return {
+        user: user,
+        users: activeUsers_().map(function (u) { return u.name; }),
+        settings: clientSettings_(),
+        light: readingLight_(),
+      };
     case 'list':
       return listEvents_(Number(req.days) || 7);
     case 'save':
@@ -201,6 +207,8 @@ function handle_(req, user) {
       return withLock_(function () { return deleteEvent_(req.id, user); });
     case 'lightAlert':
       return lightAlert_(req.id);
+    case 'setLight':
+      return setLight_(req.light, user);
     case 'listAppointments':
       return listAppointments_();
     case 'saveAppointment':
@@ -271,6 +279,7 @@ function clientSettings_() {
     breastLimitMin: Number(s.breastLimitMin) || 0,
     // Only whether it's set. The URL works like a password, so it stays in the Sheet.
     lightAlert: !!String(s.haWebhookUrl || '').trim(),
+    lightControl: !!String(s.haLightWebhookUrl || '').trim(),
   };
 }
 
@@ -726,6 +735,29 @@ function postLight_(url, payload) {
   });
   if (res.getResponseCode() >= 300) Logger.log('Home Assistant answered ' + res.getResponseCode() + ': ' + res.getContentText());
   return res.getResponseCode() < 300;
+}
+
+/**
+ * The reading light as last set from the app. Home Assistant's webhooks can't answer with the light's real
+ * state, so a change made at the wall switch or in Home Assistant doesn't show here.
+ */
+function readingLight_() {
+  var saved = PropertiesService.getScriptProperties().getProperty('readingLight');
+  return saved ? JSON.parse(saved) : { on: false, brightness: 50 };
+}
+
+/** The app's reading light switch and slider. Calls Settings → haLightWebhookUrl with on and brightness (1-100). */
+function setLight_(input, user) {
+  var url = String(settingsWithDefaults_().haLightWebhookUrl || '').trim();
+  if (!url) throw new Error('The reading light is not set up. Paste a webhook URL into Settings → haLightWebhookUrl.');
+  if (!input || typeof input.on !== 'boolean') throw new Error('Missing light state');
+  var brightness = Math.round(Number(input.brightness));
+  if (isNaN(brightness) || brightness < 1 || brightness > 100) throw new Error('Brightness must be between 1 and 100');
+  var light = { on: input.on, brightness: brightness, by: user, at: new Date().toISOString() };
+  var ok = postLight_(url, { event: 'set', on: light.on, brightness: brightness, by: user });
+  if (!ok) throw new Error("Home Assistant didn't accept that. Check Settings → haLightWebhookUrl.");
+  PropertiesService.getScriptProperties().setProperty('readingLight', JSON.stringify(light));
+  return light;
 }
 
 function testLight() {
