@@ -21,13 +21,16 @@ export function useTracker(conn: Connection) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const pending = useRef(0)
+  // Bumped on every save or delete, so a poll that started before one can't overwrite it.
+  const mutations = useRef(0)
 
   const refresh = useCallback(async () => {
     // Skip a poll while a save is in flight so it can't overwrite the optimistic update.
     if (pending.current > 0) return
+    const seen = mutations.current
     try {
       const list = await backend.list(days)
-      if (pending.current === 0) setEvents(list)
+      if (pending.current === 0 && mutations.current === seen) setEvents(list)
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -62,6 +65,7 @@ export function useTracker(conn: Connection) {
       const previous = events
       setEvents((list) => [...list.filter((e) => e.id !== event.id), event])
       pending.current++
+      mutations.current++
       try {
         const saved = await backend.save(event)
         setEvents((list) => [...list.filter((e) => e.id !== saved.id), saved])
@@ -81,6 +85,7 @@ export function useTracker(conn: Connection) {
       const previous = events
       setEvents((list) => list.filter((e) => e.id !== id))
       pending.current++
+      mutations.current++
       try {
         await backend.remove(id)
       } catch (e) {

@@ -23,6 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useNow } from "@/hooks/use-now"
 import { analyze, bucketSize, type Analysis, type Range } from "@/lib/analytics"
 import { formatDuration, HOUR } from "@/lib/time"
 import type { LogEvent } from "@/lib/types"
@@ -41,21 +42,20 @@ const diaperChart = {
   stool: { label: "Stool", color: "var(--chart-2)" },
 } satisfies ChartConfig
 
-function rangeFor(preset: Preset, custom: DateRange | undefined): Range {
-  const now = Date.now()
-  if (preset === "24h") return { from: now - 24 * HOUR, to: now }
+function rangeFor(preset: Preset, custom: DateRange | undefined, now: number): Range {
+  if (preset === "24h") return { from: now - 24 * HOUR, to: now, live: true }
   if (preset === "7d" || !custom?.from) {
     // Today plus the six full days before it, so each bar is a whole calendar day.
     const from = new Date()
     from.setHours(0, 0, 0, 0)
     from.setDate(from.getDate() - 6)
-    return { from: from.getTime(), to: now }
+    return { from: from.getTime(), to: now, live: true }
   }
   const from = new Date(custom.from)
   from.setHours(0, 0, 0, 0)
   const to = new Date(custom.to ?? custom.from)
   to.setHours(24, 0, 0, 0)
-  return { from: from.getTime(), to: Math.min(to.getTime(), now) }
+  return { from: from.getTime(), to: Math.min(to.getTime(), now), live: to.getTime() >= now }
 }
 
 function rangeLabel(range: Range) {
@@ -81,8 +81,12 @@ function summaryText(name: string, range: Range, a: Analysis, unit: Unit) {
     "",
     `Wet diapers: ${d.wet} (${per(d.wetPerDay, a.days)})`,
     `Stools: ${d.stool} (${per(d.stoolPerDay, a.days)})`,
-    d.longestWithoutWet.ms ? `Longest without a wet diaper: ${formatDuration(d.longestWithoutWet.ms)}` : "",
-    d.longestWithoutStool.ms ? `Longest without a stool: ${formatDuration(d.longestWithoutStool.ms)}` : "",
+    d.longestWithoutWet.ms
+      ? `Longest without a wet diaper: ${formatDuration(d.longestWithoutWet.ms)}${d.longestWithoutWet.ongoing ? " (still going)" : ""}`
+      : "",
+    d.longestWithoutStool.ms
+      ? `Longest without a stool: ${formatDuration(d.longestWithoutStool.ms)}${d.longestWithoutStool.ongoing ? " (still going)" : ""}`
+      : "",
   ]
   return lines.filter((l, i) => l !== "" || lines[i - 1] !== "").join("\n")
 }
@@ -102,7 +106,9 @@ export function Reports({
   const [custom, setCustom] = useState<DateRange | undefined>()
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  const range = useMemo(() => rangeFor(preset, custom), [preset, custom])
+  // Ticks every minute so a range that ends "now" keeps up while the tab stays open.
+  const now = useNow(60_000)
+  const range = useMemo(() => rangeFor(preset, custom, now), [preset, custom, now])
   const a = useMemo(() => analyze(events, range), [events, range])
 
   useEffect(() => {
@@ -269,20 +275,12 @@ export function Reports({
             <Stat
               label="Longest without wet"
               value={a.diaper.longestWithoutWet.ms ? formatDuration(a.diaper.longestWithoutWet.ms) : "–"}
-              sub={
-                a.diaper.longestWithoutWet.at
-                  ? `from ${format(new Date(a.diaper.longestWithoutWet.at), "MMM d, h:mm a")}`
-                  : "needs 2+ wet diapers"
-              }
+              sub={gapNote(a.diaper.longestWithoutWet, "wet diapers")}
             />
             <Stat
               label="Longest without stool"
               value={a.diaper.longestWithoutStool.ms ? formatDuration(a.diaper.longestWithoutStool.ms) : "–"}
-              sub={
-                a.diaper.longestWithoutStool.at
-                  ? `from ${format(new Date(a.diaper.longestWithoutStool.at), "MMM d, h:mm a")}`
-                  : "needs 2+ stools"
-              }
+              sub={gapNote(a.diaper.longestWithoutStool, "stools")}
             />
           </div>
 
@@ -311,6 +309,12 @@ export function Reports({
       </Tabs>
     </div>
   )
+}
+
+function gapNote(gap: { at?: number; ongoing: boolean }, noun: string) {
+  if (gap.at === undefined) return `needs more ${noun} logged`
+  const from = format(new Date(gap.at), "MMM d, h:mm a")
+  return gap.ongoing ? `since ${from}, still going` : `from ${from}`
 }
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
