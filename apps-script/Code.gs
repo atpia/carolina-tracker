@@ -30,6 +30,7 @@ var DEFAULT_SETTINGS = [
   ['announceEntries', false, 'Also post every new entry to Discord'],
 ];
 var DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
+var TEXT_FIELDS = { id: true, type: true, kind: true, notes: true, by: true, updatedBy: true };
 var NUMBER_FIELDS = { amountStartMl: true, amountEndMl: true, percent: true, confidence: true, doseMg: true };
 var EDITABLE_FIELDS = [
   'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent', 'confidence', 'doseMg', 'notes',
@@ -279,8 +280,9 @@ function eventToRow_(e) {
     var v = e[h];
     if (v === undefined || v === null) return '';
     if (DATE_FIELDS[h]) return v ? new Date(v) : '';
-    // A leading apostrophe stops the Sheet reading text like "=2 oz" as a formula. It isn't part of the value.
-    if (typeof v === 'string' && /^[=+\-@]/.test(v)) return "'" + v;
+    // A leading apostrophe keeps text as typed: without it the Sheet turns "3/4" into a date, "10:30" into a
+    // time, "007" into 7 and "=2 oz" into a formula. It isn't part of the value read back.
+    if (TEXT_FIELDS[h] && v !== '') return "'" + String(v);
     return v;
   });
 }
