@@ -210,6 +210,7 @@ function Tracker({
             unit={unit}
             days={tracker.days}
             loadedDays={tracker.loadedDays}
+            failed={tracker.error !== null}
             onOpen={setDraft}
             onLoadMore={tracker.loadMore}
           />
