@@ -9,6 +9,7 @@ import {
   Settings as SettingsIcon,
   UserRound,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Dashboard } from "@/components/dashboard"
 import { EntrySheet, type Draft } from "@/components/entry-sheet"
@@ -131,7 +132,16 @@ function Tracker({
         <Alert variant="destructive">
           <CloudOff />
           <AlertTitle>Couldn't sign in</AlertTitle>
-          <AlertDescription>{tracker.sessionError}</AlertDescription>
+          <AlertDescription>
+            <p>{tracker.sessionError}</p>
+            {tracker.queued > 0 && (
+              <p>
+                {tracker.queued === 1 ? "1 entry" : `${tracker.queued} entries`} on this phone{" "}
+                {tracker.queued === 1 ? "hasn't" : "haven't"} synced. They'll sync if you sign back in with the same
+                code.
+              </p>
+            )}
+          </AlertDescription>
         </Alert>
         <Button onClick={() => location.reload()}>
           <RefreshCw /> Try again
@@ -155,8 +165,15 @@ function Tracker({
             </span>
           )}
           {tracker.error && !tracker.loading && (
-            <button className="text-destructive flex items-center gap-1" onClick={tracker.refresh}>
-              <CloudOff className="size-3.5" /> Offline, tap to retry
+            <button
+              className="text-destructive flex items-center gap-1"
+              onClick={() => {
+                if (tracker.error?.kind === "server") toast.error(tracker.error.message)
+                tracker.refresh()
+              }}
+            >
+              <CloudOff className="size-3.5" />{" "}
+              {tracker.error.kind === "network" ? "Offline, tap to retry" : "Sync problem, tap to retry"}
             </button>
           )}
           {tracker.user && (

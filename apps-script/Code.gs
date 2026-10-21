@@ -152,6 +152,8 @@ function doPost(e) {
     out = { ok: false, error: message };
     // The app keeps the entry and tries again later instead of dropping it.
     if ((err && err.retry) || isServiceError_(message)) out.retry = true;
+    // The app signs this phone out and keeps its unsynced entries.
+    if (err && err.auth) out.auth = true;
   }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -177,7 +179,9 @@ function authenticate_(code) {
   if (!match) {
     // Slow down guessing.
     Utilities.sleep(1500);
-    throw new Error('That code is not valid. Ask for your personal setup link.');
+    var err = new Error('That code is not valid. Ask for your personal setup link.');
+    err.auth = true;
+    throw err;
   }
   return match.name;
 }
