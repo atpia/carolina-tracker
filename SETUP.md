@@ -6,6 +6,7 @@ You need:
 - A Google account to own the Sheet that stores the data.
 - This GitHub repo, which hosts the app at **https://atpia.github.io/carolina-tracker/**.
 - Optionally, a Discord channel for reminders.
+- Optionally, Home Assistant with Nabu Casa, to flash a light when a breastfeed runs long.
 
 ## 1. Create the Google Sheet
 
@@ -14,7 +15,7 @@ You need:
 3. Open **Extensions → Apps Script**. A code editor opens in a new tab.
 4. Delete everything in `Code.gs` and paste in the whole contents of [`apps-script/Code.gs`](apps-script/Code.gs). Use the **Raw** button on GitHub so you can copy it all. Click the 💾 save icon.
 5. In the toolbar, make sure the function dropdown next to **Debug** says **setup** (not `onOpen`), then click **Run**. The Execution log at the bottom should end with "Execution completed".
-6. Google asks for permission. Click **Review permissions**, choose your account, then **Advanced → Go to Untitled project (unsafe) → Allow**. The warning appears because you wrote the script yourself and Google hasn't reviewed it. The script can only touch this one spreadsheet and send messages to Discord.
+6. Google asks for permission. Click **Review permissions**, choose your account, then **Advanced → Go to Untitled project (unsafe) → Allow**. The warning appears because you wrote the script yourself and Google hasn't reviewed it. The script can only touch this one spreadsheet and send messages to Discord and Home Assistant.
 
 Back in the Sheet you'll now have three tabs along the bottom (you may need to reload the page):
 
@@ -57,7 +58,7 @@ To remove someone's access, set their `active` cell to `FALSE` in the Users tab.
 1. In Discord, open **Server Settings → Integrations → Webhooks → New Webhook**. Pick the channel, give it a name, then **Copy Webhook URL**.
 2. Paste that URL into `discordWebhook` in the Sheet's Settings tab.
 3. Click **Baby tracker → Send a test Discord message** and check the channel.
-4. Click **Baby tracker → 3. Turn on Discord reminders**. Google may ask for permission once more. If `discordWebhook` is blank, it says so instead of turning reminders on.
+4. Click **Baby tracker → 3. Turn on reminders (Discord and Home Assistant)**. Google may ask for permission once more. If both `discordWebhook` and `haWebhookUrl` are blank, it says so instead of turning reminders on.
 
 The script checks every 5 minutes and posts once for each of these:
 - 🍼 the feeding window opens (2 hours after the last feeding ended), and ⏰ again if no one has fed her by 4 hours
@@ -85,6 +86,82 @@ Places you go often can be saved under **Saved places** at the bottom of the Cal
 In Google Calendar each event's title starts with the baby's name from Settings → `babyName`, for example **Carolina - Two-week checkup**. The app shows the plain title. After changing `babyName`, run **Copy all appointments to the calendar again** to update the existing events.
 
 Each appointment gets an hour in the calendar when no end time is set. Google Calendar's own notifications for that calendar apply, so set them under the calendar's **Settings and sharing → Event notifications**.
+
+## 6. Flash a light with Home Assistant (optional)
+
+When a running breastfeeding timer passes `breastLimitMin` (15 minutes per side by default, so 30 for a both-sides feed), the Sheet calls a Home Assistant webhook, and an automation flashes a light. It goes out once per feed. Any phone with the app open asks for it the moment the limit passes; if no phone has the app open, the 5-minute reminder check sends it instead, up to 15 minutes late. A feed that went past the limit more than 15 minutes ago never flashes, so turning this on in the middle of a long feed stays quiet. Setting `breastLimitMin` to 0 turns it off along with the rest of the limit warnings.
+
+### In Home Assistant
+
+1. Go to **Settings → Automations & scenes → Create automation → Create new automation**, then **⋮ → Edit in YAML**.
+2. Paste this, and change `light.nursery` (three places) to your light's entity ID. Find it under **Settings → Devices & services → Entities**.
+3. Change the `webhook_id` to something long and random. Anyone with the URL can flash the light, so treat it like a password. A password manager's generator works, or add a **Webhook** trigger in the visual editor and copy the ID it makes up.
+4. **Save**.
+
+```yaml
+alias: Breastfeeding limit light
+description: Flash the light when the baby tracker's breastfeeding timer passes the per-side limit
+mode: single
+triggers:
+  - trigger: webhook
+    webhook_id: carolina-feed-limit-CHANGE-THIS-TO-SOMETHING-RANDOM
+    allowed_methods:
+      - POST
+    # The Sheet calls from Google's servers, outside your home network.
+    local_only: false
+actions:
+  # Remember how the light was, so it goes back afterwards.
+  - action: scene.create
+    data:
+      scene_id: before_feed_limit_flash
+      snapshot_entities:
+        - light.nursery
+  - repeat:
+      count: 5
+      sequence:
+        - action: light.turn_on
+          target:
+            entity_id: light.nursery
+          data:
+            brightness_pct: 100
+            # Delete this line for a bulb that is white only.
+            color_name: red
+        - delay:
+            milliseconds: 600
+        - action: light.turn_off
+          target:
+            entity_id: light.nursery
+        - delay:
+            milliseconds: 600
+  - action: scene.turn_on
+    target:
+      entity_id: scene.before_feed_limit_flash
+```
+
+Some lights (Philips Hue, for example) can flash on their own. For those, the `repeat` block can be swapped for a single `light.turn_on` with `flash: long`.
+
+The webhook also sends details you can use in the automation, for example in a notification: `{{ trigger.json.side }}` ("Left breast"), `{{ trigger.json.minutes }}`, `{{ trigger.json.by }}` (who started the timer) and `{{ trigger.json.baby }}`. The test from the Sheet's menu sends `{{ trigger.json.event }}` as `test` instead of `breast_limit`, if you want the automation to tell them apart.
+
+### The webhook URL
+
+The URL is your Nabu Casa address with `/api/webhook/` and the `webhook_id` on the end, for example:
+
+```
+https://abcdefghijklmnop.ui.nabu.casa/api/webhook/carolina-feed-limit-CHANGE-THIS-TO-SOMETHING-RANDOM
+```
+
+Find your Nabu Casa address under **Settings → Home Assistant Cloud → Remote access**. Remote access has to be on.
+
+### In the Sheet
+
+1. Paste the latest [`apps-script/Code.gs`](apps-script/Code.gs) into the Apps Script editor (replace everything) and save.
+2. Deploy a new version: **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The phones need this to ask for the light the moment the limit passes.
+3. Reload the Sheet and click **Baby tracker → 1. Set up tabs and codes**. It adds the new `haWebhookUrl` row to the Settings tab and leaves everything else alone.
+4. Paste the webhook URL into `haWebhookUrl`.
+5. Click **Baby tracker → Send a test Home Assistant alert**. The light should flash. Home Assistant answers every webhook URL the same way, even one with a mistyped ID, so if the Sheet says "Sent!" but nothing flashes, check the `webhook_id` against the URL and look at the automation's **Traces**.
+6. Click **Baby tracker → 3. Turn on reminders (Discord and Home Assistant)**, if you haven't before, so the 5-minute check can send it when no phone has the app open. Google may ask for permission to connect to an external service.
+
+Nothing changes on the phones. Once they reload, the app's **Settings → Schedule** shows "Flash a light at the limit: Home Assistant". To turn the light off, clear `haWebhookUrl`.
 
 ## Changing things later
 

@@ -10,6 +10,7 @@ A small phone-friendly app for tracking a newborn's feedings and diapers, plus m
 - **Temperature:** log readings (rectal, armpit, forehead or ear) in °F or °C. Reports graph them against the 100.4 °F fever line.
 - **Shared:** each caregiver has a personal code, and every entry records who logged or last edited it.
 - **Discord reminders** (optional) when a feeding, diaper check or dose is due.
+- **Home Assistant light** (optional) that flashes when a breastfeed passes the per-side limit.
 
 Setup instructions are in [SETUP.md](SETUP.md). The Google Apps Script backend is in [`apps-script/Code.gs`](apps-script/Code.gs).
 

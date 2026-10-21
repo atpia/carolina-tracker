@@ -136,6 +136,11 @@ export function SettingsView({
             value={settings.breastLimitMin > 0 ? `${settings.breastLimitMin} min per side` : "Off"}
           />
           <Separator />
+          <Row
+            label="Flash a light at the limit"
+            value={settings.lightAlert && settings.breastLimitMin > 0 ? "Home Assistant" : "Off"}
+          />
+          <Separator />
           <Row label="Medication every" value={`${settings.medIntervalH} hours, alternating`} />
           <Separator />
           <Row label="Diaper check after a change" value={`${settings.diaperAfterChangeH} hours`} />

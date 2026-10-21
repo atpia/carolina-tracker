@@ -16,7 +16,7 @@ var DEFAULT_SETTINGS = [
   ['babyName', 'Carolina', 'Shown at the top of the app'],
   ['feedMinH', 2, 'Hours after a feeding ends when the next window opens'],
   ['feedMaxH', 4, 'Hours after a feeding ends when the next one is due'],
-  ['breastLimitMin', 15, 'Minutes per breast before a running breastfeeding timer flashes and Discord is told (0 turns it off)'],
+  ['breastLimitMin', 15, 'Minutes per breast before a running breastfeeding timer flashes, Discord is told and the Home Assistant light flashes (0 turns it off)'],
   ['medIntervalH', 4, "Hours between mom's doses (alternating ibuprofen and Tylenol)"],
   ['diaperAfterChangeH', 2, 'Hours until the next diaper check after a wet or stool diaper'],
   ['diaperAfterCleanH', 1, 'Hours until the next check after one that found the diaper clean'],
@@ -31,6 +31,7 @@ var DEFAULT_SETTINGS = [
   ['probioticReminderHour', 20, "Hour of the day (0-23, so 20 is 8 PM) for a Discord nudge if mom's probiotics are not logged yet that day. Type off for none"],
   ['vitaminDReminderHour', 20, "Hour of the day (0-23) for a Discord nudge if the baby's Vitamin D is not logged yet that day. Type off for none"],
   ['announceEntries', false, 'Also post every new entry to Discord'],
+  ['haWebhookUrl', '', 'Home Assistant webhook URL (https://….ui.nabu.casa/api/webhook/…) called when a breastfeed passes breastLimitMin, to flash a light. Leave blank for none'],
   ['calendarId', '', 'Google Calendar that appointments are copied to. Filled in by "Set up appointments calendar"'],
 ];
 var DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
@@ -109,11 +110,12 @@ function onOpen() {
     .createMenu('Baby tracker')
     .addItem('1. Set up tabs and codes', 'setup')
     .addItem('2. Refresh setup links', 'refreshSetupLinks')
-    .addItem('3. Turn on Discord reminders', 'enableReminders')
+    .addItem('3. Turn on reminders (Discord and Home Assistant)', 'enableReminders')
     .addItem('4. Set up appointments calendar', 'setupCalendar')
     .addSeparator()
     .addItem('Send a test Discord message', 'testDiscord')
-    .addItem('Turn off Discord reminders', 'turnOffReminders')
+    .addItem('Send a test Home Assistant alert', 'testLight')
+    .addItem('Turn off reminders', 'turnOffReminders')
     .addItem('Copy all appointments to the calendar again', 'resyncCalendar')
     .addToUi();
 }
@@ -197,6 +199,8 @@ function handle_(req, user) {
       return saved.event;
     case 'delete':
       return withLock_(function () { return deleteEvent_(req.id, user); });
+    case 'lightAlert':
+      return lightAlert_(req.id);
     case 'listAppointments':
       return listAppointments_();
     case 'saveAppointment':
@@ -265,6 +269,8 @@ function clientSettings_() {
     targetFeedsPerDay: Number(s.targetFeedsPerDay),
     targetWetPerDay: Number(s.targetWetPerDay),
     breastLimitMin: Number(s.breastLimitMin) || 0,
+    // Only whether it's set. The URL works like a password, so it stays in the Sheet.
+    lightAlert: !!String(s.haWebhookUrl || '').trim(),
   };
 }
 
@@ -504,19 +510,20 @@ function testDiscord() {
 }
 
 function enableReminders() {
-  if (!String(settingsWithDefaults_().discordWebhook || '').trim()) {
-    toast_('Paste a Discord webhook URL into Settings → discordWebhook first, then turn reminders on.');
+  var s = settingsWithDefaults_();
+  if (!String(s.discordWebhook || '').trim() && !String(s.haWebhookUrl || '').trim()) {
+    toast_('Paste a Discord webhook URL into Settings → discordWebhook or a Home Assistant one into haWebhookUrl first, then turn reminders on.');
     return;
   }
   disableReminders();
   ScriptApp.newTrigger('checkReminders').timeBased().everyMinutes(5).create();
-  toast_('Discord reminders are on. They are checked every 5 minutes.');
+  toast_('Reminders are on. They are checked every 5 minutes.');
 }
 
 /** The menu item. disableReminders stays silent so enableReminders can reuse it. */
 function turnOffReminders() {
   disableReminders();
-  toast_('Discord reminders are off.');
+  toast_('Reminders are off.');
 }
 
 function disableReminders() {
@@ -539,10 +546,25 @@ var STALE_TIMER_H = 3;
 /** Runs every 5 minutes from a trigger. Each reminder is sent once per entry. */
 function checkReminders() {
   var s = settingsWithDefaults_();
-  if (!String(s.discordWebhook || '').trim()) return;
+  var light = !!String(s.haWebhookUrl || '').trim();
+  if (!String(s.discordWebhook || '').trim() && !light) return;
   var H = 3600000;
   var now = Date.now();
   var events = listEvents_(3);
+
+  // The app usually asks for the light first, the moment the limit passes. This catches it when no phone has
+  // the app open. Two caregivers can each have a timer going, the same as the app.
+  if (light) {
+    events.forEach(function (e) {
+      if (e.type !== 'feeding' || e.end) return;
+      try {
+        flashLight_(e, s, now);
+      } catch (err) {
+        // A busy Sheet shouldn't hold up the Discord reminders. The next check tries again.
+        Logger.log(err);
+      }
+    });
+  }
   var props = PropertiesService.getScriptProperties();
   var sent = JSON.parse(props.getProperty('sentReminders') || '[]');
   var messages = [];
@@ -623,6 +645,105 @@ function checkReminders() {
   if (messages.length && postDiscord_(messages.join('\n'), s)) {
     props.setProperty('sentReminders', JSON.stringify(sent.slice(-100)));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Home Assistant
+//
+// Settings → haWebhookUrl is a Home Assistant webhook trigger, reached from outside the house through Nabu Casa.
+// An automation on that webhook flashes a light. See SETUP.md.
+
+/** How late a light alert can still go out, e.g. when reminders are first turned on mid-feed. */
+var LIGHT_LATE_MS = 15 * 60000;
+/** Phone clocks run a little fast or slow, so the app may ask just before the Sheet's clock says it's time. */
+var LIGHT_EARLY_MS = 2 * 60000;
+
+/** The app asks for this the moment a timer passes the limit, so the light doesn't wait for the 5-minute check. */
+function lightAlert_(id) {
+  var row = findRow_(id);
+  if (!row) return false;
+  var feed = rowToEvent_(eventsSheet_().getRange(row, 1, 1, EVENT_HEADERS.length).getValues()[0]);
+  if (truthy_(feed.deleted)) return false;
+  return flashLight_(feed, settingsWithDefaults_(), Date.now());
+}
+
+/**
+ * Calls the Home Assistant webhook once per feed, when a running breastfeed passes the limit. Matches
+ * breastLimit() in the app: a "both sides" feed gets the limit on each side, so it flashes at twice it.
+ */
+function flashLight_(feed, s, now) {
+  var url = String(s.haWebhookUrl || '').trim();
+  var limit = Number(s.breastLimitMin) || 0;
+  var breast = feed.kind === 'left' || feed.kind === 'right' || feed.kind === 'both';
+  if (!url || !(limit > 0) || !breast || feed.type !== 'feeding' || feed.end) return false;
+  var startedAt = new Date(feed.start).getTime();
+  var minutes = (feed.kind === 'both' ? 2 : 1) * limit;
+  var overAt = startedAt + minutes * 60000;
+  if (now < overAt - LIGHT_EARLY_MS || now - overAt > LIGHT_LATE_MS) return false;
+
+  // Claimed under the lock so the app on two phones and the 5-minute check can't all flash it.
+  var props = PropertiesService.getScriptProperties();
+  var key = 'light:' + feed.id;
+  var claimed = withLock_(function () {
+    var sent = JSON.parse(props.getProperty('lightAlerts') || '[]');
+    if (sent.indexOf(key) >= 0) return false;
+    sent.push(key);
+    props.setProperty('lightAlerts', JSON.stringify(sent.slice(-50)));
+    return true;
+  });
+  if (!claimed) return false;
+
+  var ok = false;
+  try {
+    ok = postLight_(url, {
+      event: 'breast_limit',
+      baby: String(s.babyName),
+      feedId: feed.id,
+      side: label_(feed),
+      minutes: minutes,
+      startedAt: new Date(startedAt).toISOString(),
+      by: feed.by || '',
+    });
+  } catch (err) {
+    Logger.log(err);
+  }
+  if (!ok) {
+    // Let the next try (the 5-minute check or another phone) have another go.
+    withLock_(function () {
+      var sent = JSON.parse(props.getProperty('lightAlerts') || '[]');
+      props.setProperty('lightAlerts', JSON.stringify(sent.filter(function (k) { return k !== key; })));
+    });
+  }
+  return ok;
+}
+
+function postLight_(url, payload) {
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() >= 300) Logger.log('Home Assistant answered ' + res.getResponseCode() + ': ' + res.getContentText());
+  return res.getResponseCode() < 300;
+}
+
+function testLight() {
+  var s = settingsWithDefaults_();
+  var url = String(s.haWebhookUrl || '').trim();
+  if (!url) {
+    toast_('Nothing sent. Paste the Home Assistant webhook URL into Settings → haWebhookUrl first.');
+    return;
+  }
+  var ok = false;
+  try {
+    ok = postLight_(url, { event: 'test', baby: String(s.babyName) });
+  } catch (err) {
+    Logger.log(err);
+  }
+  toast_(ok
+    ? 'Sent! The light should flash. If it does not, check the automation\'s webhook ID and its traces in Home Assistant.'
+    : 'Home Assistant did not accept it. Check the URL in Settings → haWebhookUrl, and see Executions for details.');
 }
 
 // ---------------------------------------------------------------------------

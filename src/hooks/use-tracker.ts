@@ -265,6 +265,8 @@ export function useTracker(conn: Connection) {
     [backend, enqueue, flush, onAuthError],
   )
 
+  const lightAlert = useCallback((id: string) => backend.lightAlert(id), [backend])
+
   // Fill gaps from defaults so an older Sheet script without newer settings still works.
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ...definedOnly(session?.settings) }), [session])
 
@@ -285,6 +287,7 @@ export function useTracker(conn: Connection) {
     refresh,
     save,
     remove,
+    lightAlert,
   }
 }
 

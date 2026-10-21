@@ -27,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Toaster } from "@/components/ui/sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAppointments } from "@/hooks/use-appointments"
+import { useLightAlert } from "@/hooks/use-light-alert"
 import { useLocalState } from "@/hooks/use-local-state"
 import { useNow } from "@/hooks/use-now"
 import { useTracker } from "@/hooks/use-tracker"
@@ -131,6 +132,7 @@ function Tracker({
     () => deriveStatus(tracker.events, tracker.settings, minute),
     [tracker.events, tracker.settings, minute],
   )
+  useLightAlert(status.activeFeeds, tracker.settings.lightAlert, tracker.lightAlert)
 
   if (tracker.sessionError) {
     return (
