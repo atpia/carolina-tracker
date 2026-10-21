@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Annoyed, Frown, Laugh, Meh, Smile, Timer, Trash2, type LucideIcon } from "lucide-react"
 
+import { AmountInput } from "@/components/amount-input"
 import { DateTimeField } from "@/components/datetime-field"
 import { confidenceLabel } from "@/components/describe"
 import { kindIcon, TYPE_ICONS } from "@/components/icons"
@@ -25,7 +26,6 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldTitle } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import { Slider } from "@/components/ui/slider"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -42,7 +42,7 @@ import {
   type LogEvent,
   type MedKind,
 } from "@/lib/types"
-import { formatAmount, fromDisplay, toDisplay, type Unit } from "@/lib/units"
+import { formatAmount, type Unit } from "@/lib/units"
 import { cn } from "@/lib/utils"
 
 /** A new entry's starting values, or an existing entry with `edit: true`. */
@@ -71,12 +71,6 @@ const TITLES: Record<EventType, string> = {
 const DURATIONS = [10, 15, 20, 30]
 
 const CONFIDENCE_ICONS: LucideIcon[] = [Frown, Annoyed, Meh, Smile, Laugh]
-
-function parseNum(value: string) {
-  if (value.trim() === "") return undefined
-  const n = Number(value)
-  return Number.isFinite(n) ? n : undefined
-}
 
 function KindOption({
   type,
@@ -287,13 +281,11 @@ export function EntrySheet({
                         {bottleMode === "amount" ? (
                           <Field>
                             <FieldLabel htmlFor="amt-drank">Drank ({unit})</FieldLabel>
-                            <Input
+                            <AmountInput
                               id="amt-drank"
-                              inputMode="decimal"
-                              value={toDisplay(event.amountStartMl, unit) ?? ""}
-                              onChange={(e) =>
-                                set({ amountStartMl: fromDisplay(parseNum(e.target.value), unit), amountEndMl: 0 })
-                              }
+                              unit={unit}
+                              value={event.amountStartMl}
+                              onValueChange={(v) => set({ amountStartMl: v, amountEndMl: 0 })}
                               placeholder={unit === "ml" ? "45" : "1.5"}
                             />
                           </Field>
@@ -301,22 +293,22 @@ export function EntrySheet({
                           <div className="grid grid-cols-2 gap-3">
                             <Field>
                               <FieldLabel htmlFor="amt-start">Offered ({unit})</FieldLabel>
-                              <Input
+                              <AmountInput
                                 id="amt-start"
-                                inputMode="decimal"
-                                value={toDisplay(event.amountStartMl, unit) ?? ""}
-                                onChange={(e) => set({ amountStartMl: fromDisplay(parseNum(e.target.value), unit) })}
+                                unit={unit}
+                                value={event.amountStartMl}
+                                onValueChange={(v) => set({ amountStartMl: v })}
                                 placeholder={unit === "ml" ? "60" : "2"}
                               />
                             </Field>
                             {bottleMode === "left" && (
                               <Field>
                                 <FieldLabel htmlFor="amt-end">Left over ({unit})</FieldLabel>
-                                <Input
+                                <AmountInput
                                   id="amt-end"
-                                  inputMode="decimal"
-                                  value={toDisplay(event.amountEndMl, unit) ?? ""}
-                                  onChange={(e) => set({ amountEndMl: fromDisplay(parseNum(e.target.value), unit) })}
+                                  unit={unit}
+                                  value={event.amountEndMl}
+                                  onValueChange={(v) => set({ amountEndMl: v })}
                                   placeholder="0"
                                 />
                               </Field>
@@ -446,11 +438,11 @@ export function EntrySheet({
                     />
                     <Field>
                       <FieldLabel htmlFor="dose">Dose (mg)</FieldLabel>
-                      <Input
+                      <AmountInput
                         id="dose"
-                        inputMode="decimal"
-                        value={event.doseMg ?? ""}
-                        onChange={(e) => set({ doseMg: parseNum(e.target.value) })}
+                        unit="mg"
+                        value={event.doseMg}
+                        onValueChange={(v) => set({ doseMg: v })}
                         placeholder="Optional, e.g. 400"
                       />
                       <FieldDescription>Quick doses on the home screen reuse the last amount entered.</FieldDescription>
