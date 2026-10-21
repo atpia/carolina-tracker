@@ -70,7 +70,7 @@ Times in the messages show in each person's own time zone. Turn individual remin
 
 - **Intervals and the baby's name:** edit the Settings tab. The app picks up changes the next time it's opened.
 - **Updating the script:** paste the new code, then go to **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The URL stays the same, so the phones keep working. Then click **Baby tracker → 1. Set up tabs and codes** once more. It adds any new columns and settings and leaves your data, codes and existing settings alone.
-- **Daily goals:** `targetFeedsPerDay` (8) and `targetWetPerDay` (6) set the goals on the app's Today card. Ask her pediatrician what to aim for.
+- **Daily goals:** `targetFeedsPerDay` and `targetWetPerDay` show a goal on the app's Today card, for example 8 feeds and 6 wet diapers. They're 0 by default, which hides them.
 - **Units:** each phone picks ml or oz under Settings in the app. Amounts are always stored in ml.
 
 ## Free tier limits
