@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
+import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { formatClock, formatDay } from "@/lib/time"
 import type { EventType, LogEvent } from "@/lib/types"
@@ -30,15 +31,18 @@ export function History({
   events,
   unit,
   days,
+  loadedDays,
   onOpen,
   onLoadMore,
 }: {
   events: LogEvent[]
   unit: Unit
   days: number
+  loadedDays: number
   onOpen: (draft: Draft) => void
   onLoadMore: () => void
 }) {
+  const loadingMore = loadedDays > 0 && loadedDays < days
   const [filter, setFilter] = useState<"all" | EventType>("all")
 
   const groups = useMemo(() => {
@@ -116,9 +120,15 @@ export function History({
         </section>
       ))}
 
-      <Button variant="outline" onClick={onLoadMore}>
-        <HistoryIcon /> Show older entries
-      </Button>
+      <div className="grid gap-1.5">
+        <Button variant="outline" onClick={onLoadMore} disabled={loadingMore}>
+          {loadingMore ? <Spinner /> : <HistoryIcon />}
+          {loadingMore ? "Loading older entries" : "Show older entries"}
+        </Button>
+        {loadedDays > 0 && (
+          <p className="text-muted-foreground text-center text-xs">Showing the last {loadedDays} days</p>
+        )}
+      </div>
     </div>
   )
 }

@@ -3,6 +3,9 @@ import { isBottle, type LogEvent, type MedKind, type Settings } from "./types"
 
 const t = (iso: string) => new Date(iso).getTime()
 
+/** A feeding timer running this long was probably never stopped. */
+export const STALE_TIMER_MS = 3 * HOUR
+
 /** How much of a bottle she actually drank, in ml. */
 export function consumedMl(e: LogEvent): number | undefined {
   if (!isBottle(e.kind) || e.amountStartMl === undefined) return undefined
@@ -21,10 +24,16 @@ function latest(events: LogEvent[], pred: (e: LogEvent) => boolean) {
 
 export function deriveStatus(events: LogEvent[], settings: Settings) {
   const now = Date.now()
-  const activeFeed = latest(events, (e) => e.type === "feeding" && !e.end)
-  // A timer this old was almost certainly never stopped, so the app asks about it instead of counting on.
-  const activeFeedStale = activeFeed !== undefined && now - t(activeFeed.start) >= 3 * HOUR
+  // Every feed without a finish time, newest first. Two caregivers can each have a timer going.
+  const activeFeeds = events
+    .filter((e) => e.type === "feeding" && !e.end)
+    .sort((a, b) => t(b.start) - t(a.start))
+    // A timer this old was almost certainly never stopped, so the app asks about it instead of counting on.
+    .map((event) => ({ event, stale: now - t(event.start) >= STALE_TIMER_MS }))
   const lastFeed = latest(events, (e) => e.type === "feeding")
+  // The latest feed is still going (and not a forgotten timer), so there is no countdown yet.
+  const feedRunning = activeFeeds.some((a) => !a.stale && a.event.id === lastFeed?.id)
+  const lastSide = latest(events, (e) => e.type === "feeding" && (e.kind === "left" || e.kind === "right"))
   const lastChange = latest(events, (e) => e.type === "diaper" && e.kind !== "dry")
   const lastCheck = latest(events, (e) => e.type === "diaper")
   const lastWet = latest(events, (e) => e.type === "diaper" && (e.kind === "wet" || e.kind === "both"))
@@ -43,6 +52,17 @@ export function deriveStatus(events: LogEvent[], settings: Settings) {
     : undefined
   const nextMedKind: MedKind = lastMed?.kind === "ibuprofen" ? "tylenol" : "ibuprofen"
   const nextMedAt = lastMed ? t(lastMed.start) + settings.medIntervalH * HOUR : undefined
+  // Alternating means each medicine comes around every other dose.
+  const sameMedGap = 2 * settings.medIntervalH * HOUR
+  const medDay = events.filter((e) => e.type === "med" && now - t(e.start) < 24 * HOUR)
+  const meds = Object.fromEntries(
+    (["ibuprofen", "tylenol"] as MedKind[]).map((kind) => {
+      const last = kind === "ibuprofen" ? lastIbuprofen : lastTylenol
+      const doses = medDay.filter((e) => e.kind === kind)
+      const mg = doses.reduce((sum, e) => sum + (e.doseMg ?? 0), 0)
+      return [kind, { last, nextAt: last ? t(last.start) + sameMedGap : undefined, doses24h: doses.length, mg24h: mg }]
+    }),
+  ) as Record<MedKind, { last?: LogEvent; nextAt?: number; doses24h: number; mg24h: number }>
 
   const since = startOfToday()
   const today = events.filter((e) => t(e.start) >= since)
@@ -51,8 +71,9 @@ export function deriveStatus(events: LogEvent[], settings: Settings) {
   const bottleMl = feeds.reduce((sum, e) => sum + (consumedMl(e) ?? 0), 0)
 
   return {
-    activeFeed,
-    activeFeedStale,
+    activeFeeds,
+    feedRunning,
+    lastSide,
     lastFeed,
     feedEndedAt,
     feedFrom,
@@ -67,6 +88,8 @@ export function deriveStatus(events: LogEvent[], settings: Settings) {
     lastTylenol,
     nextMedKind,
     nextMedAt,
+    meds,
+    targets: { feeds: settings.targetFeedsPerDay, wet: settings.targetWetPerDay },
     today: {
       feeds: feeds.length,
       bottleMl,

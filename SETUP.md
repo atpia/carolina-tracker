@@ -22,7 +22,7 @@ Back in the Sheet you'll now have three tabs along the bottom (you may need to r
 | --- | --- |
 | **Events** | Every feeding, diaper and dose. Each row records who logged it and who last edited it. Deleted entries stay here with `deleted = TRUE`, so nothing is ever lost. |
 | **Users** | One row per caregiver with their personal code. Rename "Caregiver 2" and "Caregiver 3" to real names. |
-| **Settings** | Feeding window (2 to 4 hours), medication interval (4 hours), diaper checks (2 hours after a change, 1 hour after a clean check), Discord options. |
+| **Settings** | Feeding window (2 to 4 hours), medication interval (4 hours), diaper checks (2 hours after a change, 1 hour after a clean check), daily goals, Discord options. |
 
 ## 2. Turn the script into a web app
 
@@ -69,7 +69,8 @@ Times in the messages show in each person's own time zone. Turn individual remin
 ## Changing things later
 
 - **Intervals and the baby's name:** edit the Settings tab. The app picks up changes the next time it's opened.
-- **Updating the script:** paste the new code, then go to **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The URL stays the same, so the phones keep working.
+- **Updating the script:** paste the new code, then go to **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The URL stays the same, so the phones keep working. Then click **Baby tracker → 1. Set up tabs and codes** once more. It adds any new columns and settings and leaves your data, codes and existing settings alone.
+- **Daily goals:** `targetFeedsPerDay` (8) and `targetWetPerDay` (6) set the goals on the app's Today card. Ask her pediatrician what to aim for.
 - **Units:** each phone picks ml or oz under Settings in the app. Amounts are always stored in ml.
 
 ## Free tier limits

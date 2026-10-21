@@ -33,6 +33,20 @@ export function saveConnection(conn: Connection | null) {
   }
 }
 
+/** The request never got an answer, as opposed to the Sheet refusing it. Safe to retry later. */
+export class NetworkError extends Error {
+  constructor() {
+    super("Can't reach the tracker. Check your connection.")
+    this.name = "NetworkError"
+  }
+}
+
+export function isNetworkError(e: unknown) {
+  return e instanceof NetworkError
+}
+
+const TIMEOUT_MS = 20_000
+
 export function newId() {
   return crypto.randomUUID()
 }
@@ -46,13 +60,22 @@ class RemoteBackend implements Backend {
   private async call<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
     // text/plain keeps this a "simple" request so the browser skips the CORS
     // preflight, which Apps Script web apps cannot answer.
-    const res = await fetch(this.conn.api, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, code: this.conn.code, ...payload }),
-    })
-    if (!res.ok) throw new Error(`Server error ${res.status}`)
-    const data = await res.json()
+    let data
+    try {
+      const res = await fetch(this.conn.api, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action, code: this.conn.code, ...payload }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      })
+      if (!res.ok) throw new Error(`Server error ${res.status}`)
+      data = await res.json()
+    } catch (e) {
+      // fetch rejects with a TypeError when offline, and a timeout aborts it.
+      if (e instanceof TypeError || (e as Error).name === "TimeoutError" || (e as Error).name === "AbortError")
+        throw new NetworkError()
+      throw e
+    }
     if (!data.ok) throw new Error(data.error || "Request failed")
     return data.result as T
   }

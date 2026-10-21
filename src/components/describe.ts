@@ -42,5 +42,6 @@ export function eventDetails(e: LogEvent, unit: Unit) {
       parts.push(`${confidenceLabel(e.confidence)} (${e.confidence}/5)`)
     }
   }
+  if (e.type === "med" && e.doseMg) parts.push(`${e.doseMg.toLocaleString()} mg`)
   return parts.join(" · ")
 }
