@@ -6,6 +6,7 @@ import { EventIcon } from "@/components/event-icon"
 import { eventDetails, eventTitle } from "@/components/describe"
 import { TYPE_ICONS } from "@/components/icons"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { useTempUnit } from "@/hooks/use-temp-unit"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
@@ -25,6 +26,7 @@ const FILTERS: { value: "all" | EventType; label: string; empty: string }[] = [
   { value: "feeding", label: "Feeds", empty: "No feeds" },
   { value: "diaper", label: "Diapers", empty: "No diapers" },
   { value: "med", label: "Meds", empty: "No meds" },
+  { value: "temp", label: "Temps", empty: "No temperatures" },
 ]
 
 export function History({
@@ -45,6 +47,8 @@ export function History({
   onOpen: (draft: Draft) => void
   onLoadMore: () => void
 }) {
+  // Re-render when the temperature unit changes, so readings switch along with it.
+  useTempUnit()
   const loadingMore = loadedDays > 0 && loadedDays < days && !failed
   const [filter, setFilter] = useState<"all" | EventType>("all")
 

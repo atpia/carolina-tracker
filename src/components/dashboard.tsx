@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { CircleCheck, CircleStop, Pencil, Plus } from "lucide-react"
+import { Fragment, useState } from "react"
+import { CircleCheck, CircleStop, Pencil, Plus, type LucideIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import type { Draft } from "@/components/entry-sheet"
@@ -21,10 +21,21 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import { useNow } from "@/hooks/use-now"
+import { useTempUnit } from "@/hooks/use-temp-unit"
 import { newId } from "@/lib/api"
 import type { Status } from "@/lib/derive"
+import { formatTemp, isFever } from "@/lib/temperature"
 import { HOUR, formatClock, formatClockRange, formatDuration, formatTimer, relative } from "@/lib/time"
-import { MED_LABELS, isBottle, type DiaperKind, type LogEvent, type PainMedKind } from "@/lib/types"
+import {
+  MED_LABELS,
+  TEMP_LABELS,
+  isBottle,
+  type DailyKind,
+  type DiaperKind,
+  type LogEvent,
+  type PainMedKind,
+  type TempMethod,
+} from "@/lib/types"
 import { formatAmount, type Unit } from "@/lib/units"
 import { cn } from "@/lib/utils"
 
@@ -70,10 +81,11 @@ export function Dashboard({
           <ActiveFeed key={event.id} event={event} now={now} onOpen={onOpen} onSave={onSave} />
         ),
       )}
-      <MedsDue status={status} now={now} quickLog={quickLog} />
-      <FeedingCard status={status} now={now} unit={unit} onOpen={onOpen} />
+      <MedsDue status={status} babyName={babyName} now={now} quickLog={quickLog} />
+      <FeedingCard status={status} now={now} unit={unit} onOpen={onOpen} quickLog={quickLog} />
       <DiaperCard status={status} babyName={babyName} now={now} onOpen={onOpen} quickLog={quickLog} />
       <MedCard status={status} now={now} onOpen={onOpen} quickLog={quickLog} />
+      <TempCard status={status} now={now} onOpen={onOpen} />
       <TodayCard status={status} unit={unit} />
     </div>
   )
@@ -126,67 +138,84 @@ function ActiveFeed({
 /** Pain relievers stop nagging after a day without a dose, in case mom no longer needs them. */
 const MED_BANNER_WINDOW = 24 * HOUR
 
-/** Stays at the top while mom can take something: the next pain reliever once it's allowed, and today's probiotics. */
+/** One line in the "Due now" banner. */
+interface DueItem {
+  key: string
+  label: string
+  sub: string
+  icon: LucideIcon
+  log: () => void
+}
+
+/**
+ * Stays at the top while something can be taken: mom's next pain reliever once it's allowed, her probiotics,
+ * and the baby's Vitamin D until today's is logged.
+ */
 function MedsDue({
   status,
+  babyName,
   now,
   quickLog,
 }: {
   status: Status
+  babyName: string
   now: number
   quickLog: (partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) => Promise<void>
 }) {
-  const { nextMedKind, nextMedAt, lastMed, meds, probioticToday } = status
-  const painReady =
-    lastMed !== undefined && nextMedAt !== undefined && now >= nextMedAt && now - t(lastMed.start) < MED_BANNER_WINDOW
-  const probioticDue = !probioticToday
-  if (!painReady && !probioticDue) return null
+  const { nextMedKind, nextMedAt, lastMed, meds, daily } = status
+  const items: DueItem[] = []
+  if (lastMed && nextMedAt !== undefined && now >= nextMedAt && now - t(lastMed.start) < MED_BANNER_WINDOW)
+    items.push({
+      key: "pain",
+      label: MED_LABELS[nextMedKind],
+      sub: `Mom · allowed since ${formatClock(nextMedAt)} (${relative(nextMedAt, now)})`,
+      icon: kindIcon("med", nextMedKind),
+      log: () =>
+        quickLog(
+          { type: "med", kind: nextMedKind, doseMg: meds[nextMedKind].last?.doseMg },
+          `${MED_LABELS[nextMedKind]} logged`,
+        ),
+    })
+  if (!daily.probiotic)
+    items.push({
+      key: "probiotic",
+      label: "Probiotics",
+      sub: "Mom · not taken yet today",
+      icon: kindIcon("med", "probiotic"),
+      log: () => quickLog({ type: "med", kind: "probiotic" }, "Probiotics logged"),
+    })
+  if (!daily.vitamind)
+    items.push({
+      key: "vitamind",
+      label: "Vitamin D",
+      sub: `${babyName} · in a bottle, not given yet today`,
+      icon: kindIcon("med", "vitamind"),
+      log: () => quickLog({ type: "med", kind: "vitamind" }, "Vitamin D logged"),
+    })
+  if (!items.length) return null
 
-  const PainIcon = kindIcon("med", nextMedKind)
-  const ProbioticIcon = kindIcon("med", "probiotic")
   return (
     <Card className="border-med/40 bg-med/10 gap-3">
       <CardHeader>
         <CardDescription className="text-med flex items-center gap-1.5 font-medium">
-          <TYPE_ICONS.med className="size-4" /> Mom can take
+          <TYPE_ICONS.med className="size-4" /> Due now
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
-        {painReady && (
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-lg font-semibold">{MED_LABELS[nextMedKind]}</div>
-              <div className="text-muted-foreground text-sm">
-                Allowed since {formatClock(nextMedAt)} ({relative(nextMedAt, now)})
+        {items.map((item, i) => (
+          <Fragment key={item.key}>
+            {i > 0 && <Separator />}
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-lg font-semibold">{item.label}</div>
+                <div className="text-muted-foreground text-sm">{item.sub}</div>
               </div>
+              <Button variant={i === 0 ? "default" : "outline"} onClick={item.log}>
+                <item.icon /> Took it
+              </Button>
             </div>
-            <Button
-              onClick={() =>
-                quickLog(
-                  { type: "med", kind: nextMedKind, doseMg: meds[nextMedKind].last?.doseMg },
-                  `${MED_LABELS[nextMedKind]} logged`,
-                )
-              }
-            >
-              <PainIcon /> Took it
-            </Button>
-          </div>
-        )}
-        {painReady && probioticDue && <Separator />}
-        {probioticDue && (
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-lg font-semibold">Probiotics</div>
-              <div className="text-muted-foreground text-sm">Not taken yet today</div>
-            </div>
-            <Button
-              variant={painReady ? "outline" : "default"}
-              onClick={() => quickLog({ type: "med", kind: "probiotic" }, "Probiotics logged")}
-            >
-              <ProbioticIcon /> Took it
-            </Button>
-          </div>
-        )}
+          </Fragment>
+        ))}
       </CardContent>
     </Card>
   )
@@ -219,11 +248,13 @@ function FeedingCard({
   now,
   unit,
   onOpen,
+  quickLog,
 }: {
   status: Status
   now: number
   unit: Unit
   onOpen: (draft: Draft) => void
+  quickLog: (partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) => Promise<void>
 }) {
   const { lastFeed, lastSide, feedRunning, feedEndedAt, feedFrom, feedBy } = status
   let headline = "No feedings logged yet"
@@ -299,6 +330,16 @@ function FeedingCard({
             Last single side was {lastSide.kind}, so the form starts on the {suggested}.
           </p>
         )}
+        <Separator />
+        <DailyRow
+          kind="vitamind"
+          label="Vitamin D"
+          hint="Drops in a bottle, once a day"
+          verb="given"
+          taken={status.daily.vitamind}
+          onOpen={onOpen}
+          onTake={() => quickLog({ type: "med", kind: "vitamind" }, "Vitamin D logged")}
+        />
       </CardContent>
     </Card>
   )
@@ -423,7 +464,7 @@ function MedCard({
   onOpen: (draft: Draft) => void
   quickLog: (partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) => Promise<void>
 }) {
-  const { nextMedKind, nextMedAt, lastMed, meds, probioticToday } = status
+  const { nextMedKind, nextMedAt, lastMed, meds, daily } = status
   const [confirm, setConfirm] = useState<{ kind: PainMedKind; reason: string } | null>(null)
   const other: PainMedKind = nextMedKind === "ibuprofen" ? "tylenol" : "ibuprofen"
   const ready = nextMedAt === undefined || now >= nextMedAt
@@ -492,8 +533,11 @@ function MedCard({
           <OtherIcon /> Took {MED_LABELS[other]} instead
         </Button>
         <Separator />
-        <ProbioticRow
-          taken={probioticToday}
+        <DailyRow
+          kind="probiotic"
+          label="Probiotics"
+          hint="Once a day, any time"
+          taken={daily.probiotic}
           onOpen={onOpen}
           onTake={() => quickLog({ type: "med", kind: "probiotic" }, "Probiotics logged")}
         />
@@ -514,17 +558,26 @@ function MedCard({
   )
 }
 
-/** Probiotics are once a day: no countdown, just whether today's has been taken. */
-function ProbioticRow({
+/** A once-a-day item: no countdown, just whether today's has been logged. */
+function DailyRow({
+  kind,
+  label,
+  hint,
+  verb = "taken",
   taken,
   onOpen,
   onTake,
 }: {
+  kind: DailyKind
+  label: string
+  hint: string
+  /** "taken" for mom, "given" for the baby. */
+  verb?: string
   taken?: LogEvent
   onOpen: (draft: Draft) => void
   onTake: () => void
 }) {
-  const Icon = kindIcon("med", "probiotic")
+  const Icon = kindIcon("med", kind)
   if (taken)
     return (
       <button
@@ -533,7 +586,9 @@ function ProbioticRow({
       >
         <CircleCheck className="text-med size-4 shrink-0" />
         <span>
-          <span className="font-medium">Probiotics taken today</span>
+          <span className="font-medium">
+            {label} {verb} today
+          </span>
           <span className="text-muted-foreground">
             {" "}
             at {formatClock(taken.start)} by {taken.by}
@@ -544,13 +599,57 @@ function ProbioticRow({
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="text-sm">
-        <div className="font-medium">Probiotics not taken yet today</div>
-        <div className="text-muted-foreground text-xs">Once a day, any time</div>
+        <div className="font-medium">
+          {label} not {verb} yet today
+        </div>
+        <div className="text-muted-foreground text-xs">{hint}</div>
       </div>
       <Button variant="outline" size="sm" onClick={onTake}>
         <Icon /> Took it
       </Button>
     </div>
+  )
+}
+
+/** Temperature is log only: the latest reading, with a fever flagged, and a button to add one. */
+function TempCard({ status, now, onOpen }: { status: Status; now: number; onOpen: (draft: Draft) => void }) {
+  const tempUnit = useTempUnit()
+  const last = status.lastTemp
+  const fever = isFever(last?.tempC)
+  return (
+    <Card className="gap-4">
+      <CardHeader>
+        <CardDescription className="flex items-center gap-1.5">
+          <TYPE_ICONS.temp className="text-temp size-4" /> Temperature
+        </CardDescription>
+        {last ? (
+          <button className="text-left" onClick={() => onOpen({ ...last, edit: true })}>
+            <CardTitle className={cn("text-2xl tabular-nums", fever && "text-destructive")}>
+              {formatTemp(last.tempC, tempUnit)}
+            </CardTitle>
+            <p className="text-muted-foreground text-sm">
+              {TEMP_LABELS[last.kind as TempMethod] ?? last.kind} at {formatClock(last.start)} (
+              {relative(t(last.start), now)}) by {last.by}
+            </p>
+          </button>
+        ) : (
+          <CardTitle className="text-2xl">No readings yet</CardTitle>
+        )}
+        {fever && (
+          <p className="text-destructive text-sm">That's a fever for a newborn. Call her doctor if you haven't.</p>
+        )}
+      </CardHeader>
+      <CardContent>
+        <Button
+          size="lg"
+          variant="outline"
+          className="w-full"
+          onClick={() => onOpen({ type: "temp", kind: last?.kind ?? "rectal" })}
+        >
+          <Plus /> Log temperature
+        </Button>
+      </CardContent>
+    </Card>
   )
 }
 

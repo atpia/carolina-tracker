@@ -9,12 +9,17 @@ import {
   type FeedKind,
   type LogEvent,
   type MedKind,
+  TEMP_LABELS,
+  type TempMethod,
 } from "@/lib/types"
+import { getTempUnit } from "@/hooks/use-temp-unit"
+import { formatTemp } from "@/lib/temperature"
 import { formatAmount, type Unit } from "@/lib/units"
 
 export function eventTitle(e: LogEvent) {
   if (e.type === "feeding") return FEED_LABELS[e.kind as FeedKind] ?? e.kind
   if (e.type === "diaper") return DIAPER_LABELS[e.kind as DiaperKind] ?? e.kind
+  if (e.type === "temp") return "Temperature"
   return MED_LABELS[e.kind as MedKind] ?? e.kind
 }
 
@@ -24,7 +29,12 @@ export function entryName(e: LogEvent) {
   if (e.type === "feeding") noun = `${(FEED_LABELS[e.kind as FeedKind] ?? e.kind).toLowerCase()} feed`
   else if (e.type === "diaper")
     noun = e.kind === "dry" ? "diaper check" : `${(DIAPER_LABELS[e.kind as DiaperKind] ?? e.kind).toLowerCase()} diaper`
-  else noun = `${e.kind === "tylenol" ? "Tylenol" : (MED_LABELS[e.kind as MedKind] ?? e.kind).toLowerCase()} dose`
+  else if (e.type === "temp") noun = "temperature check"
+  else {
+    const name = MED_LABELS[e.kind as MedKind] ?? e.kind
+    // Brand and vitamin names keep their capitals.
+    noun = `${e.kind === "tylenol" || e.kind === "vitamind" ? name : name.toLowerCase()} dose`
+  }
   return `the ${formatClock(e.start)} ${noun}`
 }
 
@@ -53,5 +63,9 @@ export function eventDetails(e: LogEvent, unit: Unit) {
     }
   }
   if (e.type === "med" && e.doseMg) parts.push(`${e.doseMg.toLocaleString()} mg`)
+  if (e.type === "temp") {
+    parts.push(formatTemp(e.tempC, getTempUnit()))
+    parts.push((TEMP_LABELS[e.kind as TempMethod] ?? e.kind).toLowerCase())
+  }
   return parts.join(" · ")
 }

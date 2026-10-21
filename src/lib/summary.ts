@@ -2,6 +2,8 @@ import { format } from "date-fns"
 
 import type { Analysis, Range } from "./analytics"
 import { formatDuration, HOUR } from "./time"
+import { formatTemp, type TempUnit } from "./temperature"
+import { TEMP_LABELS, type TempMethod } from "./types"
 import { formatAmount, type Unit } from "./units"
 
 export function rangeLabel(range: Range) {
@@ -15,7 +17,7 @@ export const per = (n: number, days: number) =>
   days >= 1.5 ? `${n.toFixed(1)} per day` : `in ${Math.round(days * 24)} hours`
 
 /** The text "Copy summary" puts on the clipboard. */
-export function summaryText(name: string, range: Range, a: Analysis, unit: Unit) {
+export function summaryText(name: string, range: Range, a: Analysis, unit: Unit, tempUnit: TempUnit = "F") {
   const f = a.feeding
   const d = a.diaper
   // null is a line left out because there's nothing to say; "" is a break between sections.
@@ -36,6 +38,16 @@ export function summaryText(name: string, range: Range, a: Analysis, unit: Unit)
     d.longestWithoutStool.ms
       ? `Longest without a stool: ${formatDuration(d.longestWithoutStool.ms)}${d.longestWithoutStool.ongoing ? " (still going)" : ""}`
       : null,
+    ...(a.temps.length
+      ? [
+          "",
+          `Temperatures: ${a.temp.count} reading${a.temp.count === 1 ? "" : "s"}`,
+          ...a.temps.map(
+            (e) =>
+              `  ${format(new Date(e.start), "MMM d, h:mm a")}: ${formatTemp(e.tempC, tempUnit)} (${(TEMP_LABELS[e.kind as TempMethod] ?? e.kind).toLowerCase()})`,
+          ),
+        ]
+      : []),
   ]
   return lines.filter((l) => l !== null).join("\n")
 }

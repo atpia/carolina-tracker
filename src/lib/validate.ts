@@ -1,3 +1,4 @@
+import { TEMP_MAX_C, TEMP_MIN_C } from "./temperature"
 import { isBottle, type LogEvent } from "./types"
 
 /** How a bottle's amount was entered: offered and left over, a percent of offered, or the amount drunk. */
@@ -21,5 +22,9 @@ export function entryErrors(e: LogEvent, mode: BottleMode, now = Date.now()): st
     if (offered === undefined && left !== undefined) out.push("Add how much was offered.")
   }
   if (e.type === "med" && (e.doseMg ?? 0) < 0) out.push("The dose can't be negative.")
+  if (e.type === "temp") {
+    if (e.tempC === undefined) out.push("Add the temperature.")
+    else if (e.tempC < TEMP_MIN_C || e.tempC > TEMP_MAX_C) out.push("That temperature looks like a typo.")
+  }
   return out
 }

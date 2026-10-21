@@ -33,14 +33,19 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { consumedMl } from "@/lib/derive"
 import { newId } from "@/lib/api"
 import { entryErrors, type BottleMode } from "@/lib/validate"
+import { useTempUnit } from "@/hooks/use-temp-unit"
+import { formatTemp, fromDisplayTemp, isFever, toDisplayTemp } from "@/lib/temperature"
 import {
   DIAPER_LABELS,
   isBottle,
+  isDaily,
   MED_LABELS,
+  TEMP_LABELS,
   type DiaperKind,
   type EventType,
   type LogEvent,
   type MedKind,
+  type TempMethod,
 } from "@/lib/types"
 import { formatAmount, type Unit } from "@/lib/units"
 import { cn } from "@/lib/utils"
@@ -50,7 +55,7 @@ export type Draft = (Partial<LogEvent> & { type: EventType; edit?: false }) | (L
 
 function blank(draft: Partial<LogEvent> & { type: EventType }, user: string): LogEvent {
   const now = new Date().toISOString()
-  const defaults: Record<EventType, string> = { feeding: "left", diaper: "wet", med: "ibuprofen" }
+  const defaults: Record<EventType, string> = { feeding: "left", diaper: "wet", med: "ibuprofen", temp: "rectal" }
   return {
     id: newId(),
     kind: defaults[draft.type],
@@ -64,7 +69,8 @@ function blank(draft: Partial<LogEvent> & { type: EventType }, user: string): Lo
 const TITLES: Record<EventType, string> = {
   feeding: "feeding",
   diaper: "diaper",
-  med: "mom's medication",
+  med: "medication",
+  temp: "temperature",
 }
 
 /** The Sheet script refuses longer notes. */
@@ -122,6 +128,7 @@ export function EntrySheet({
   // Whether someone changed the start time, so "Start timer instead" knows to keep it.
   const [startEdited, setStartEdited] = useState(false)
   const editing = Boolean(opened?.draft.edit)
+  const tempUnit = useTempUnit()
 
   // Fill the form while rendering rather than in an effect, so reopening never flashes the previous entry.
   if (draft && draft !== opened?.draft) {
@@ -139,7 +146,8 @@ export function EntrySheet({
     if (!event) return
     const out: LogEvent = { ...event, ...override }
     if (out.type !== "feeding") delete out.end
-    if (out.type !== "med" || out.kind === "probiotic") delete out.doseMg
+    if (out.type !== "med" || isDaily(out.kind)) delete out.doseMg
+    if (out.type !== "temp") delete out.tempC
     if (out.type === "feeding" && isBottle(out.kind)) {
       delete out.confidence
       if (bottleMode === "percent") delete out.amountEndMl
@@ -447,7 +455,12 @@ export function EntrySheet({
                   <>
                     <Field>
                       <FieldTitle>Medication</FieldTitle>
-                      <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>
+                      <ToggleGroup
+                        type="single"
+                        value={event.kind}
+                        onValueChange={(v) => v && set({ kind: v })}
+                        className="grid grid-cols-2"
+                      >
                         {(Object.keys(MED_LABELS) as MedKind[]).map((k) => (
                           <KindOption key={k} type="med" kind={k} label={MED_LABELS[k]} />
                         ))}
@@ -459,7 +472,12 @@ export function EntrySheet({
                       value={event.start}
                       onChange={(v) => v && set({ start: v })}
                     />
-                    {event.kind !== "probiotic" && (
+                    {event.kind === "vitamind" && (
+                      <FieldDescription>
+                        Vitamin D is the baby's: the drops that go in her bottle once a day.
+                      </FieldDescription>
+                    )}
+                    {!isDaily(event.kind) && (
                       <Field>
                         <FieldLabel htmlFor="dose">Dose (mg)</FieldLabel>
                         <AmountInput
@@ -474,6 +492,49 @@ export function EntrySheet({
                         </FieldDescription>
                       </Field>
                     )}
+                  </>
+                )}
+
+                {event.type === "temp" && (
+                  <>
+                    <Field>
+                      <FieldLabel htmlFor="temp">Temperature (°{tempUnit})</FieldLabel>
+                      <AmountInput
+                        id="temp"
+                        unit="mg"
+                        value={toDisplayTemp(event.tempC, tempUnit, 2)}
+                        onValueChange={(v) => set({ tempC: fromDisplayTemp(v, tempUnit) })}
+                        placeholder={tempUnit === "F" ? "98.6" : "37.0"}
+                        className="h-12 text-lg"
+                        autoFocus={!editing}
+                      />
+                      {isFever(event.tempC) && (
+                        <FieldDescription className="text-destructive">
+                          {formatTemp(38, tempUnit)} or higher counts as a fever for a newborn. Call her doctor.
+                        </FieldDescription>
+                      )}
+                    </Field>
+                    <Field>
+                      <FieldTitle>How it was taken</FieldTitle>
+                      <ToggleGroup
+                        type="single"
+                        value={event.kind}
+                        onValueChange={(v) => v && set({ kind: v })}
+                        className="grid grid-cols-2"
+                      >
+                        {(Object.keys(TEMP_LABELS) as TempMethod[]).map((k) => (
+                          <ToggleGroupItem key={k} value={k}>
+                            {TEMP_LABELS[k]}
+                          </ToggleGroupItem>
+                        ))}
+                      </ToggleGroup>
+                    </Field>
+                    <DateTimeField
+                      id="start"
+                      label="Time"
+                      value={event.start}
+                      onChange={(v) => v && set({ start: v })}
+                    />
                   </>
                 )}
 

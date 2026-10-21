@@ -9,7 +9,7 @@
 
 var EVENT_HEADERS = [
   'id', 'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent',
-  'confidence', 'notes', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'deleted', 'doseMg',
+  'confidence', 'notes', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'deleted', 'doseMg', 'tempC',
 ];
 var USER_HEADERS = ['name', 'code', 'active', 'setupLink'];
 var DEFAULT_SETTINGS = [
@@ -28,18 +28,20 @@ var DEFAULT_SETTINGS = [
   ['remindDiaper', true, 'Discord alert when a diaper check is due'],
   ['remindMeds', true, "Discord alert when mom's next dose is due"],
   ['probioticReminderHour', 20, "Hour of the day (0-23, so 20 is 8 PM) for a Discord nudge if mom's probiotics are not logged yet that day. Type off for none"],
+  ['vitaminDReminderHour', 20, "Hour of the day (0-23) for a Discord nudge if the baby's Vitamin D is not logged yet that day. Type off for none"],
   ['announceEntries', false, 'Also post every new entry to Discord'],
 ];
 var DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
 var TEXT_FIELDS = { id: true, type: true, kind: true, notes: true, by: true, updatedBy: true };
-var NUMBER_FIELDS = { amountStartMl: true, amountEndMl: true, percent: true, confidence: true, doseMg: true };
+var NUMBER_FIELDS = { amountStartMl: true, amountEndMl: true, percent: true, confidence: true, doseMg: true, tempC: true };
 var EDITABLE_FIELDS = [
-  'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent', 'confidence', 'doseMg', 'notes',
+  'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent', 'confidence', 'doseMg', 'tempC', 'notes',
 ];
 var KINDS = {
   feeding: { left: true, right: true, both: true, formula: true, expressed: true },
   diaper: { wet: true, stool: true, both: true, dry: true },
-  med: { ibuprofen: true, tylenol: true, probiotic: true },
+  med: { ibuprofen: true, tylenol: true, probiotic: true, vitamind: true },
+  temp: { rectal: true, armpit: true, forehead: true, ear: true },
 };
 
 // ---------------------------------------------------------------------------
@@ -367,6 +369,9 @@ function validate_(e) {
   checkNumber_(e.amountStartMl, 0, Infinity, 'Amount offered');
   checkNumber_(e.amountEndMl, 0, Infinity, 'Amount left over');
   checkNumber_(e.doseMg, 0, Infinity, 'Dose');
+  // Stored in °C. Anything outside this range is a typo, most likely °F typed as °C.
+  checkNumber_(e.tempC, 30, 44, 'Temperature');
+  if (e.type === 'temp' && (e.tempC === undefined || e.tempC === null || e.tempC === '')) throw new Error('Missing temperature');
 }
 
 function checkNumber_(v, min, max, name) {
@@ -417,11 +422,15 @@ function deleteEvent_(id, user) {
 var LABELS = {
   left: 'Left breast', right: 'Right breast', both: 'Both breasts', formula: 'Formula', expressed: 'Expressed milk',
   wet: 'Wet diaper', stool: 'Stool diaper', dry: 'Diaper check (clean)',
-  ibuprofen: 'Ibuprofen', tylenol: 'Tylenol', probiotic: 'Probiotics',
+  ibuprofen: 'Ibuprofen', tylenol: 'Tylenol', probiotic: 'Probiotics', vitamind: 'Vitamin D',
 };
 
 function label_(e) {
   if (e.type === 'diaper' && e.kind === 'both') return 'Wet + stool diaper';
+  if (e.type === 'temp') {
+    var f = Math.round((Number(e.tempC) * 9 / 5 + 32) * 10) / 10;
+    return 'Temperature ' + f + ' °F (' + e.kind + ')';
+  }
   return LABELS[e.kind] || e.kind;
 }
 
@@ -547,7 +556,7 @@ function checkReminders() {
 
   if (truthy_(s.remindMeds)) {
     // Probiotics are once a day and stay out of the ibuprofen and Tylenol rotation.
-    var med = latest_(events, function (e) { return e.type === 'med' && e.kind !== 'probiotic'; });
+    var med = latest_(events, function (e) { return e.type === 'med' && (e.kind === 'ibuprofen' || e.kind === 'tylenol'); });
     if (med) {
       var tookAt = new Date(med.start).getTime();
       var next = med.kind === 'ibuprofen' ? 'Tylenol' : 'Ibuprofen';
@@ -556,18 +565,20 @@ function checkReminders() {
     }
   }
 
-  var probioticHour = String(s.probioticReminderHour).trim().toLowerCase();
-  if (probioticHour !== 'off' && probioticHour !== 'none') {
-    var tz = Session.getScriptTimeZone();
-    var today = Utilities.formatDate(new Date(now), tz, 'yyyy-MM-dd');
-    var hourNow = Number(Utilities.formatDate(new Date(now), tz, 'H'));
+  var tz = Session.getScriptTimeZone();
+  var today = Utilities.formatDate(new Date(now), tz, 'yyyy-MM-dd');
+  var hourNow = Number(Utilities.formatDate(new Date(now), tz, 'H'));
+  [
+    { kind: 'probiotic', hour: s.probioticReminderHour, message: "🌿 Probiotics have not been logged today. Has mom taken them?" },
+    { kind: 'vitamind', hour: s.vitaminDReminderHour, message: '☀️ ' + s.babyName + "'s Vitamin D has not been logged today. Has it gone in a bottle?" },
+  ].forEach(function (daily) {
+    var hour = String(daily.hour).trim().toLowerCase();
+    if (hour === 'off' || hour === 'none' || hourNow < Number(hour)) return;
     var taken = events.some(function (e) {
-      return e.type === 'med' && e.kind === 'probiotic' && Utilities.formatDate(new Date(e.start), tz, 'yyyy-MM-dd') === today;
+      return e.type === 'med' && e.kind === daily.kind && Utilities.formatDate(new Date(e.start), tz, 'yyyy-MM-dd') === today;
     });
-    if (!taken && hourNow >= Number(probioticHour)) {
-      once('probiotic:' + today, now, '🌿 Probiotics have not been logged today. Has mom taken them?');
-    }
-  }
+    if (!taken) once(daily.kind + ':' + today, now, daily.message);
+  });
 
   if (messages.length && postDiscord_(messages.join('\n'), s)) {
     props.setProperty('sentReminders', JSON.stringify(sent.slice(-100)));

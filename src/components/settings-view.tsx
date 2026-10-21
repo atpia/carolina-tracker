@@ -18,6 +18,8 @@ import { Field, FieldDescription, FieldGroup, FieldTitle } from "@/components/ui
 import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { Settings } from "@/lib/types"
+import { setTempUnit, useTempUnit } from "@/hooks/use-temp-unit"
+import type { TempUnit } from "@/lib/temperature"
 import type { Unit } from "@/lib/units"
 
 export type Theme = "system" | "light" | "dark"
@@ -46,6 +48,7 @@ export function SettingsView({
   /** Entries on this phone that haven't reached the Sheet yet. */
   queued?: number
 }) {
+  const tempUnit = useTempUnit()
   const unsynced = queued === 1 ? "1 entry on this phone hasn't" : `${queued} entries on this phone haven't`
   return (
     <div className="grid gap-4">
@@ -69,6 +72,13 @@ export function SettingsView({
               <FieldDescription>
                 Amounts are always saved in ml, so switching never changes past entries.
               </FieldDescription>
+            </Field>
+            <Field>
+              <FieldTitle>Temperature units</FieldTitle>
+              <ToggleGroup type="single" value={tempUnit} onValueChange={(v) => v && setTempUnit(v as TempUnit)}>
+                <ToggleGroupItem value="F">°F</ToggleGroupItem>
+                <ToggleGroupItem value="C">°C</ToggleGroupItem>
+              </ToggleGroup>
             </Field>
             <Field>
               <FieldTitle>Appearance</FieldTitle>

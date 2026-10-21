@@ -4,6 +4,8 @@ import {
   CircleDot,
   CircleDotDashed,
   Droplets,
+  Sun,
+  Thermometer,
   Leaf,
   Milk,
   Pill,
@@ -44,11 +46,13 @@ export const KIND_ICONS: Record<string, LucideIcon> = {
   ibuprofen: Pill,
   tylenol: Tablets,
   probiotic: Leaf,
+  vitamind: Sun,
 }
 
 /** "both" means both breasts for a feeding and wet + stool for a diaper. */
 export function kindIcon(type: EventType, kind: string): LucideIcon {
   if (kind === "both") return type === "diaper" ? WetAndStool : RefreshCcwDot
+  if (type === "temp") return Thermometer
   return KIND_ICONS[kind] ?? (type === "feeding" ? Baby : type === "diaper" ? Droplets : Pill)
 }
 
@@ -60,4 +64,5 @@ export const TYPE_ICONS: Record<EventType, LucideIcon> = {
   feeding: Baby,
   diaper: Droplets,
   med: PillBottle,
+  temp: Thermometer,
 }

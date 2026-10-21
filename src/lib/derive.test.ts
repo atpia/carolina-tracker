@@ -138,7 +138,26 @@ describe("probiotics", () => {
   })
 
   it("only counts a dose taken today", () => {
-    expect(deriveStatus([ev("med", "probiotic", 13)], DEFAULT_SETTINGS).probioticToday).toBeUndefined()
-    expect(deriveStatus([ev("med", "probiotic", 2)], DEFAULT_SETTINGS).probioticToday?.kind).toBe("probiotic")
+    expect(deriveStatus([ev("med", "probiotic", 13)], DEFAULT_SETTINGS).daily.probiotic).toBeUndefined()
+    expect(deriveStatus([ev("med", "probiotic", 2)], DEFAULT_SETTINGS).daily.probiotic?.kind).toBe("probiotic")
+  })
+})
+
+describe("vitamin D", () => {
+  it("is tracked per day apart from probiotics and the pain relievers", () => {
+    const s = deriveStatus([ev("med", "tylenol", 5), ev("med", "vitamind", 1)], DEFAULT_SETTINGS)
+    expect(s.daily.vitamind?.kind).toBe("vitamind")
+    expect(s.daily.probiotic).toBeUndefined()
+    expect(s.nextMedKind).toBe("ibuprofen")
+  })
+})
+
+describe("temperature", () => {
+  it("finds the latest reading", () => {
+    const s = deriveStatus(
+      [ev("temp", "rectal", 3, { tempC: 37 }), ev("temp", "armpit", 1, { tempC: 37.4 })],
+      DEFAULT_SETTINGS,
+    )
+    expect(s.lastTemp?.tempC).toBe(37.4)
   })
 })

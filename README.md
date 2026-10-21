@@ -6,6 +6,8 @@ A small phone-friendly app for tracking a newborn's feedings and diapers, plus m
 - **Next feeding window:** 2 to 4 hours after the last feeding ended.
 - **Diapers:** wet, stool, both, or "checked, still clean", with a countdown to the next check.
 - **Mom's medication:** shows which one is next and a countdown to when it's allowed. Probiotics are once a day: the card shows whether today's has been taken.
+- **Vitamin D:** the baby's daily drops, shown on the Feeding card and in the "Due now" banner until logged.
+- **Temperature:** log readings (rectal, armpit, forehead or ear) in °F or °C. Reports graph them against the 100.4 °F fever line.
 - **Shared:** each caregiver has a personal code, and every entry records who logged or last edited it.
 - **Discord reminders** (optional) when a feeding, diaper check or dose is due.
 

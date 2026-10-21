@@ -1,9 +1,13 @@
-export type EventType = "feeding" | "diaper" | "med"
+export type EventType = "feeding" | "diaper" | "med" | "temp"
 export type FeedKind = "left" | "right" | "both" | "formula" | "expressed"
 export type DiaperKind = "wet" | "stool" | "both" | "dry"
-export type MedKind = "ibuprofen" | "tylenol" | "probiotic"
-/** The pain relievers mom alternates. Probiotics are once a day and stay out of that rotation. */
-export type PainMedKind = Exclude<MedKind, "probiotic">
+export type MedKind = "ibuprofen" | "tylenol" | "probiotic" | "vitamind"
+/** Once a day: mom's probiotics and the baby's Vitamin D drops. They stay out of the pain reliever rotation. */
+export type DailyKind = "probiotic" | "vitamind"
+/** The pain relievers mom alternates. */
+export type PainMedKind = Exclude<MedKind, DailyKind>
+/** Where a temperature was taken. */
+export type TempMethod = "rectal" | "armpit" | "forehead" | "ear"
 
 export interface LogEvent {
   id: string
@@ -20,6 +24,8 @@ export interface LogEvent {
   confidence?: number
   /** Mom's medication only: the dose in mg, if someone entered it. */
   doseMg?: number
+  /** Temperature readings only, always stored in °C. */
+  tempC?: number
   notes?: string
   by: string
   createdAt?: string
@@ -77,6 +83,23 @@ export const MED_LABELS: Record<MedKind, string> = {
   ibuprofen: "Ibuprofen",
   tylenol: "Tylenol",
   probiotic: "Probiotics",
+  vitamind: "Vitamin D",
+}
+
+export const TEMP_LABELS: Record<TempMethod, string> = {
+  rectal: "Rectal",
+  armpit: "Armpit",
+  forehead: "Forehead",
+  ear: "Ear",
+}
+
+/** 100.4 °F. For a newborn, a reading this high is a reason to call the doctor. */
+export const FEVER_C = 38
+
+export const DAILY_KINDS: DailyKind[] = ["probiotic", "vitamind"]
+
+export function isDaily(kind: string): kind is DailyKind {
+  return kind === "probiotic" || kind === "vitamind"
 }
 
 export function isPainMed(kind: string): kind is PainMedKind {

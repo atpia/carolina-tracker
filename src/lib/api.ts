@@ -189,6 +189,11 @@ function sampleEvents(): LogEvent[] {
   // A morning probiotic on each past day, with today's still to take.
   const sinceMidnight = (Date.now() - startOfToday()) / H
   for (let d = 1; d < 7; d++) add("med", "probiotic", sinceMidnight + 24 * (d - 1) + 15 - rand())
+  // Vitamin D in a morning bottle, and a temperature or two a day, one of them a little warm.
+  for (let d = 1; d < 7; d++) add("med", "vitamind", sinceMidnight + 24 * (d - 1) + 14 - rand())
+  for (let h = 5; h < 7 * 24; h += 10 + rand() * 8)
+    add("temp", rand() < 0.7 ? "rectal" : "armpit", h, { tempC: Math.round((36.8 + rand() * 0.7) * 10) / 10 })
+  add("temp", "rectal", 60, { tempC: 38.1, notes: "A little warm after her shots" })
   return events
 }
 

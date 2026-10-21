@@ -1,5 +1,13 @@
 import { HOUR, startOfToday } from "./time"
-import { isBottle, isPainMed, type LogEvent, type PainMedKind, type Settings } from "./types"
+import {
+  DAILY_KINDS,
+  isBottle,
+  isPainMed,
+  type DailyKind,
+  type LogEvent,
+  type PainMedKind,
+  type Settings,
+} from "./types"
 
 const t = (iso: string) => new Date(iso).getTime()
 
@@ -68,8 +76,11 @@ export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.
   const today = events.filter((e) => t(e.start) >= since)
   const feeds = today.filter((e) => e.type === "feeding")
   const diapers = today.filter((e) => e.type === "diaper")
-  // Probiotics are once per calendar day, so the only question is whether today's has been taken.
-  const probioticToday = latest(today, (e) => e.type === "med" && e.kind === "probiotic")
+  // Once-a-day items only ask whether today's has been taken.
+  const daily = Object.fromEntries(
+    DAILY_KINDS.map((kind) => [kind, latest(today, (e) => e.type === "med" && e.kind === kind)]),
+  ) as Record<DailyKind, LogEvent | undefined>
+  const lastTemp = latest(events, (e) => e.type === "temp" && e.tempC !== undefined)
   const bottleMl = feeds.reduce((sum, e) => sum + (consumedMl(e) ?? 0), 0)
 
   return {
@@ -91,7 +102,8 @@ export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.
     nextMedKind,
     nextMedAt,
     meds,
-    probioticToday,
+    daily,
+    lastTemp,
     targets: { feeds: settings.targetFeedsPerDay, wet: settings.targetWetPerDay },
     today: {
       feeds: feeds.length,

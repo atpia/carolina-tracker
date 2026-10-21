@@ -110,6 +110,8 @@ export function analyze(events: LogEvent[], range: Range) {
     .sort((a, b) => t(a.start) - t(b.start))
   const feeds = inRange.filter((e) => e.type === "feeding")
   const diapers = inRange.filter((e) => e.type === "diaper")
+  const temps = inRange.filter((e) => e.type === "temp" && e.tempC !== undefined)
+  const tempValues = temps.map((e) => e.tempC!)
   const days = (range.to - range.from) / DAY
 
   const buckets = makeBuckets(range)
@@ -151,6 +153,13 @@ export function analyze(events: LogEvent[], range: Range) {
     buckets,
     feeds,
     diapers,
+    temps,
+    temp: {
+      count: temps.length,
+      highest: temps.length ? temps.reduce((a, b) => (b.tempC! > a.tempC! ? b : a)) : undefined,
+      lowest: temps.length ? temps.reduce((a, b) => (b.tempC! < a.tempC! ? b : a)) : undefined,
+      avgC: avg(tempValues),
+    },
     feeding: {
       count: feeds.length,
       perDay: feeds.length / days,

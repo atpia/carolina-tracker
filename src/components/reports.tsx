@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { format } from "date-fns"
 import type { DateRange } from "react-day-picker"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
 import { CalendarRange, ClipboardCopy, Droplets } from "lucide-react"
 import { toast } from "sonner"
 
@@ -25,10 +25,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useNow } from "@/hooks/use-now"
+import { useTempUnit } from "@/hooks/use-temp-unit"
 import { analyze, bucketSize, type Range } from "@/lib/analytics"
 import { per, rangeLabel, summaryText } from "@/lib/summary"
+import { formatTemp, toDisplayTemp } from "@/lib/temperature"
 import { formatDuration, HOUR } from "@/lib/time"
-import type { LogEvent } from "@/lib/types"
+import { FEVER_C, type LogEvent } from "@/lib/types"
 import { formatAmount, toDisplay, type Unit } from "@/lib/units"
 
 type Preset = "24h" | "7d" | "custom"
@@ -90,6 +92,7 @@ export function Reports({
 
   // Ticks every minute so a range that ends "now" keeps up while the tab stays open.
   const now = useNow(60_000)
+  const tempUnit = useTempUnit()
   const range = useMemo(() => rangeFor(preset, custom, now), [preset, custom, now])
   const a = useMemo(() => analyze(events, range), [events, range])
 
@@ -98,7 +101,7 @@ export function Reports({
   }, [range.from, onEnsureDays])
 
   async function copySummary() {
-    const text = summaryText(babyName, range, a, unit)
+    const text = summaryText(babyName, range, a, unit, tempUnit)
     try {
       await navigator.clipboard.writeText(text)
       toast.success("Summary copied. Paste it into a message or note for the doctor.")
@@ -113,6 +116,18 @@ export function Reports({
   const hourly = bucketSize(range) === "hour"
   const unitLabel = hourly ? "hour" : "day"
   const chartData = a.buckets.map((b) => ({ ...b, bottle: toDisplay(b.bottleMl, unit) ?? 0 }))
+  const tempData = a.temps.map((e) => ({
+    time: new Date(e.start).getTime(),
+    temp: toDisplayTemp(e.tempC, tempUnit),
+  }))
+  const fever = toDisplayTemp(FEVER_C, tempUnit)!
+  // Keep the fever line in view, with a little room around the readings.
+  const tempValues = tempData.map((d) => d.temp!)
+  const pad = tempUnit === "F" ? 1 : 0.5
+  const tempDomain = [
+    Math.floor(Math.min(fever - 2 * pad, ...tempValues) - pad / 2),
+    Math.ceil(Math.max(fever + pad, ...tempValues) + pad / 2),
+  ]
 
   return (
     <div className="grid grid-cols-1 gap-4">
@@ -174,6 +189,9 @@ export function Reports({
           </TabsTrigger>
           <TabsTrigger value="diapers">
             <Droplets /> Diapers
+          </TabsTrigger>
+          <TabsTrigger value="temp">
+            <TYPE_ICONS.temp /> Temp
           </TabsTrigger>
         </TabsList>
 
@@ -295,6 +313,74 @@ export function Reports({
           </Card>
 
           <LogTable events={a.diapers} unit={unit} empty="No diapers in this range." />
+        </TabsContent>
+
+        <TabsContent value="temp" className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Stat
+              label="Readings"
+              value={String(a.temp.count)}
+              sub={a.temp.avgC !== undefined ? `average ${formatTemp(a.temp.avgC, tempUnit)}` : undefined}
+            />
+            <Stat
+              label="Highest"
+              value={a.temp.highest ? formatTemp(a.temp.highest.tempC, tempUnit) : "–"}
+              sub={a.temp.highest ? format(new Date(a.temp.highest.start), "MMM d, h:mm a") : undefined}
+            />
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Temperature</CardTitle>
+              <CardDescription>
+                Each reading in °{tempUnit}. The dashed line is {formatTemp(FEVER_C, tempUnit)}, a fever for a newborn.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-2">
+              {tempData.length === 0 ? (
+                <p className="text-muted-foreground px-3 py-6 text-center text-sm">No temperatures in this range.</p>
+              ) : (
+                <ChartContainer
+                  config={{ temp: { label: `°${tempUnit}`, color: "var(--chart-2)" } }}
+                  className="aspect-auto h-56 w-full"
+                >
+                  <LineChart data={tempData} margin={{ left: -12, right: 12, top: 8 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis
+                      dataKey="time"
+                      type="number"
+                      scale="time"
+                      domain={[range.from, range.to]}
+                      tickFormatter={(v: number) => format(new Date(v), hourly ? "h a" : "MMM d")}
+                      tickLine={false}
+                      axisLine={false}
+                      tickMargin={8}
+                      minTickGap={24}
+                    />
+                    <YAxis domain={tempDomain} tickLine={false} axisLine={false} width={44} />
+                    <ReferenceLine y={fever} stroke="var(--destructive)" strokeDasharray="4 4" />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          labelFormatter={(_, p) => format(new Date(p[0]?.payload.time), "MMM d, h:mm a")}
+                        />
+                      }
+                    />
+                    <Line
+                      dataKey="temp"
+                      type="linear"
+                      stroke="var(--color-temp)"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: "var(--color-temp)" }}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ChartContainer>
+              )}
+            </CardContent>
+          </Card>
+
+          <LogTable events={a.temps} unit={unit} empty="No temperatures in this range." />
         </TabsContent>
       </Tabs>
     </div>
