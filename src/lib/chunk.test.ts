@@ -13,9 +13,9 @@ function memoryStorage() {
 
 describe("isChunkLoadError", () => {
   it("recognizes Chrome, Safari and Firefox wording", () => {
-    expect(isChunkLoadError(new TypeError("Failed to fetch dynamically imported module: https://x/reports-abc.js"))).toBe(
-      true,
-    )
+    expect(
+      isChunkLoadError(new TypeError("Failed to fetch dynamically imported module: https://x/reports-abc.js")),
+    ).toBe(true)
     expect(isChunkLoadError(new TypeError("Importing a module script failed."))).toBe(true)
     expect(isChunkLoadError(new TypeError("error loading dynamically imported module"))).toBe(true)
   })

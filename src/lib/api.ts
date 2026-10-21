@@ -117,7 +117,8 @@ class RemoteBackend implements Backend {
       if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") throw new NetworkError()
       throw new ServerError("The tracker sent back something unexpected.", "format")
     }
-    if (!data || typeof data !== "object") throw new ServerError("The tracker sent back something unexpected.", "format")
+    if (!data || typeof data !== "object")
+      throw new ServerError("The tracker sent back something unexpected.", "format")
     if (!data.ok) {
       const message = String(data.error || "Request failed")
       if (data.retry) throw new ServerError(message, "busy")

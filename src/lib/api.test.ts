@@ -5,7 +5,10 @@ import { AuthError, createBackend, isAuthError, isRetryable, NetworkError, Serve
 const backend = createBackend({ api: "https://script.example/exec", code: "abcd-efgh-jkmn" })
 
 function reply(body: string, status = 200) {
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status })))
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(body, { status })),
+  )
 }
 
 async function failure(): Promise<unknown> {
