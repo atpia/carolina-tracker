@@ -658,7 +658,10 @@ function setupCalendar() {
   toast_('Appointments will show up in the "' + cal.getName() + '" calendar. Share it from Google Calendar so others see it too.');
 }
 
-/** Menu item. Copies every upcoming appointment to the calendar again, e.g. after changing calendarId. */
+/**
+ * Menu item. Copies every upcoming appointment to the calendar again, e.g. after changing calendarId, and
+ * refreshes past ones that are already there, e.g. after the title format changes.
+ */
 function resyncCalendar() {
   var cal = appointmentsCalendar_();
   if (!cal) {
@@ -672,14 +675,16 @@ function resyncCalendar() {
     var count = 0;
     rows.forEach(function (row, i) {
       var a = rowToAppointment_(row);
-      if (!a.id || !a.start || truthy_(a.deleted) || new Date(a.end || a.start).getTime() < Date.now()) return;
+      if (!a.id || !a.start || truthy_(a.deleted)) return;
+      // Past appointments already in the calendar get refreshed too, but missing ones aren't added after the fact.
+      if (!a.calendarEventId && new Date(a.end || a.start).getTime() < Date.now()) return;
       syncToCalendar_(a, cal);
       sheet.getRange(i + 2, 1, 1, APPT_HEADERS.length).setValues([appointmentToRow_(a)]);
       count++;
     });
     return count;
   });
-  toast_(n === 1 ? '1 upcoming appointment copied.' : n + ' upcoming appointments copied.');
+  toast_(n === 1 ? '1 appointment copied.' : n + ' appointments copied.');
 }
 
 function setSetting_(key, value) {
@@ -821,6 +826,12 @@ function deleteAppointment_(id, user) {
   return true;
 }
 
+/** "Carolina - Two-week checkup", so the baby's appointments stand out in a shared calendar. The app keeps the plain title. */
+function calendarTitle_(a) {
+  var prefix = String(settingsWithDefaults_().babyName || '').trim();
+  return prefix ? prefix + ' - ' + a.title : a.title;
+}
+
 /** Create or update the calendar event for `a`, recording its ID or what went wrong on `a`. */
 function syncToCalendar_(a, cal) {
   if (!cal) {
@@ -836,13 +847,13 @@ function syncToCalendar_(a, cal) {
       'Added by ' + a.by + ' in the baby tracker app. Edit it there: changes made in Google Calendar get overwritten.';
     var ev = a.calendarEventId ? cal.getEventById(a.calendarEventId) : null;
     if (ev) {
-      ev.setTitle(a.title);
+      ev.setTitle(calendarTitle_(a));
       ev.setTime(start, end);
       ev.setLocation(a.location || '');
       ev.setDescription(description);
     } else {
       // Also covers an event someone deleted by hand in Google Calendar: the app's copy wins.
-      ev = cal.createEvent(a.title, start, end, { location: a.location || '', description: description });
+      ev = cal.createEvent(calendarTitle_(a), start, end, { location: a.location || '', description: description });
     }
     a.calendarEventId = ev.getId();
     a.syncError = '';

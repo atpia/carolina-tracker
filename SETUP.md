@@ -82,6 +82,8 @@ To use a calendar you already have instead, paste its ID (Google Calendar → it
 
 Places you go often can be saved under **Saved places** at the bottom of the Calendar tab (or with **Save this address as a place** while making an appointment). They're stored in the Sheet's **Places** tab, and tapping one fills in its address. The address is what goes into the calendar event's location, so tapping it in Google Calendar opens Maps.
 
+In Google Calendar each event's title starts with the baby's name from Settings → `babyName`, for example **Carolina - Two-week checkup**. The app shows the plain title. After changing `babyName`, run **Copy all appointments to the calendar again** to update the existing events.
+
 Each appointment gets an hour in the calendar when no end time is set. Google Calendar's own notifications for that calendar apply, so set them under the calendar's **Settings and sharing → Event notifications**.
 
 ## Changing things later
