@@ -22,8 +22,8 @@ function latest(events: LogEvent[], pred: (e: LogEvent) => boolean) {
   return best
 }
 
-export function deriveStatus(events: LogEvent[], settings: Settings) {
-  const now = Date.now()
+/** Everything the home screen shows, as of `now`. Pass a ticking clock so it keeps up without new data. */
+export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.now()) {
   // Every feed without a finish time, newest first. Two caregivers can each have a timer going.
   const activeFeeds = events
     .filter((e) => e.type === "feeding" && !e.end)
@@ -64,7 +64,7 @@ export function deriveStatus(events: LogEvent[], settings: Settings) {
     }),
   ) as Record<MedKind, { last?: LogEvent; nextAt?: number; doses24h: number; mg24h: number }>
 
-  const since = startOfToday()
+  const since = startOfToday(now)
   const today = events.filter((e) => t(e.start) >= since)
   const feeds = today.filter((e) => e.type === "feeding")
   const diapers = today.filter((e) => e.type === "diaper")

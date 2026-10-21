@@ -3,10 +3,17 @@ import { createRoot } from "react-dom/client"
 
 import "./index.css"
 import App from "./App.tsx"
+import { ErrorBoundary } from "./components/error-boundary"
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary
+      title="Something went wrong"
+      description="Your entries are safe. Reload the app to carry on."
+      className="mx-auto grid min-h-dvh max-w-md content-center gap-4 p-6"
+    >
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )
 

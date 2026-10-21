@@ -86,6 +86,41 @@ describe("medication", () => {
   })
 })
 
+describe("as time passes", () => {
+  it("rolls today's counts over at midnight without new data", () => {
+    const evening = new Date(2026, 9, 21, 23, 50).getTime()
+    const events: LogEvent[] = [
+      {
+        id: "a",
+        type: "feeding",
+        kind: "left",
+        start: new Date(2026, 9, 21, 23, 30).toISOString(),
+        end: new Date(2026, 9, 21, 23, 45).toISOString(),
+        by: "Test",
+      },
+      { id: "b", type: "diaper", kind: "wet", start: new Date(2026, 9, 21, 23, 40).toISOString(), by: "Test" },
+    ]
+    const before = deriveStatus(events, DEFAULT_SETTINGS, evening)
+    expect(before.today.feeds).toBe(1)
+    expect(before.today.wet).toBe(1)
+    const after = deriveStatus(events, DEFAULT_SETTINGS, new Date(2026, 9, 22, 0, 10).getTime())
+    expect(after.today.feeds).toBe(0)
+    expect(after.today.wet).toBe(0)
+  })
+
+  it("turns a running timer into a forgotten one", () => {
+    const events = [ev("feeding", "left", 1)]
+    expect(deriveStatus(events, DEFAULT_SETTINGS, NOW).activeFeeds[0].stale).toBe(false)
+    expect(deriveStatus(events, DEFAULT_SETTINGS, NOW + 2 * HOUR).activeFeeds[0].stale).toBe(true)
+  })
+
+  it("drops doses older than 24 hours from the daily counts", () => {
+    const events = [ev("med", "ibuprofen", 20, { doseMg: 400 })]
+    expect(deriveStatus(events, DEFAULT_SETTINGS, NOW).meds.ibuprofen.doses24h).toBe(1)
+    expect(deriveStatus(events, DEFAULT_SETTINGS, NOW + 5 * HOUR).meds.ibuprofen.mg24h).toBe(0)
+  })
+})
+
 describe("consumedMl", () => {
   it("uses left over, then percent", () => {
     expect(consumedMl(ev("feeding", "formula", 1, { amountStartMl: 60, amountEndMl: 20 }))).toBe(40)

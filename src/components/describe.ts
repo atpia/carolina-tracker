@@ -1,5 +1,5 @@
 import { consumedMl } from "@/lib/derive"
-import { formatDuration } from "@/lib/time"
+import { formatClock, formatDuration } from "@/lib/time"
 import {
   DIAPER_LABELS,
   FEED_LABELS,
@@ -16,6 +16,16 @@ export function eventTitle(e: LogEvent) {
   if (e.type === "feeding") return FEED_LABELS[e.kind as FeedKind] ?? e.kind
   if (e.type === "diaper") return DIAPER_LABELS[e.kind as DiaperKind] ?? e.kind
   return MED_LABELS[e.kind as MedKind] ?? e.kind
+}
+
+/** Names an entry in a sentence: "the 2:15 AM wet diaper", "the 9:00 PM Tylenol dose". */
+export function entryName(e: LogEvent) {
+  let noun: string
+  if (e.type === "feeding") noun = `${(FEED_LABELS[e.kind as FeedKind] ?? e.kind).toLowerCase()} feed`
+  else if (e.type === "diaper")
+    noun = e.kind === "dry" ? "diaper check" : `${(DIAPER_LABELS[e.kind as DiaperKind] ?? e.kind).toLowerCase()} diaper`
+  else noun = `${e.kind === "tylenol" ? "Tylenol" : (MED_LABELS[e.kind as MedKind] ?? e.kind).toLowerCase()} dose`
+  return `the ${formatClock(e.start)} ${noun}`
 }
 
 const CONFIDENCE = ["", "Barely ate", "A little", "Okay", "Good", "Great"]

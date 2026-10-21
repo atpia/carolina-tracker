@@ -41,9 +41,55 @@ export class NetworkError extends Error {
   }
 }
 
+/**
+ * Something between the phone and the Sheet failed: an error status, a page that isn't the script's JSON
+ * (a wifi login page, a Google error page), or the script asking for a retry because the Sheet was busy.
+ * Nothing was refused, so it's safe to retry later.
+ */
+export class ServerError extends Error {
+  /** "status" for an error status, "format" for a reply that wasn't JSON, "busy" when the script said to retry. */
+  reason: "status" | "format" | "busy"
+  status?: number
+  constructor(message: string, reason: ServerError["reason"], status?: number) {
+    super(message)
+    this.name = "ServerError"
+    this.reason = reason
+    this.status = status
+  }
+}
+
+/** The Sheet doesn't accept this phone's code any more, for example after its `active` cell was set to FALSE. */
+export class AuthError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "AuthError"
+  }
+}
+
 export function isNetworkError(e: unknown) {
   return e instanceof NetworkError
 }
+
+/** A failure worth retrying later, as opposed to the Sheet refusing the request. */
+export function isRetryable(e: unknown) {
+  return e instanceof NetworkError || e instanceof ServerError
+}
+
+export function isAuthError(e: unknown) {
+  return e instanceof AuthError
+}
+
+/** What the connect screen says when a link doesn't work. */
+export function connectErrorMessage(e: unknown) {
+  if (isNetworkError(e)) return "Couldn't reach the tracker. Check the link."
+  // The app's own page refuses a POST with 405, and any other page isn't the script's JSON.
+  if (e instanceof ServerError && e.reason !== "busy")
+    return "That link doesn't look like the tracker's script URL. It should end in /exec."
+  return (e as Error).message
+}
+
+// Scripts from before the `auth` flag only send this message for a code they don't accept.
+const OLD_AUTH_MESSAGE = /^That code is not valid/
 
 const TIMEOUT_MS = 20_000
 
@@ -60,23 +106,34 @@ class RemoteBackend implements Backend {
   private async call<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
     // text/plain keeps this a "simple" request so the browser skips the CORS
     // preflight, which Apps Script web apps cannot answer.
-    let data
+    let res: Response
     try {
-      const res = await fetch(this.conn.api, {
+      res = await fetch(this.conn.api, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ action, code: this.conn.code, ...payload }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       })
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
+    } catch {
+      // fetch rejects with a TypeError when offline, and a timeout aborts it.
+      throw new NetworkError()
+    }
+    if (!res.ok) throw new ServerError(`Server error ${res.status}`, "status", res.status)
+    let data
+    try {
       data = await res.json()
     } catch (e) {
-      // fetch rejects with a TypeError when offline, and a timeout aborts it.
-      if (e instanceof TypeError || (e as Error).name === "TimeoutError" || (e as Error).name === "AbortError")
-        throw new NetworkError()
-      throw e
+      if ((e as Error).name === "TimeoutError" || (e as Error).name === "AbortError") throw new NetworkError()
+      throw new ServerError("The tracker sent back something unexpected.", "format")
     }
-    if (!data.ok) throw new Error(data.error || "Request failed")
+    if (!data || typeof data !== "object")
+      throw new ServerError("The tracker sent back something unexpected.", "format")
+    if (!data.ok) {
+      const message = String(data.error || "Request failed")
+      if (data.retry) throw new ServerError(message, "busy")
+      if (data.auth || OLD_AUTH_MESSAGE.test(message)) throw new AuthError(message)
+      throw new Error(message)
+    }
     return data.result as T
   }
 

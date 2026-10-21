@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
-import { createBackend, isNetworkError, type Connection } from "@/lib/api"
+import { entryName } from "@/components/describe"
+import { createBackend, isAuthError, isNetworkError, isRetryable, type Connection } from "@/lib/api"
 import { DEFAULT_SETTINGS, type LogEvent, type Session } from "@/lib/types"
 
 const POLL_MS = 30_000
 const SESSION_KEY = "ct.session"
 const EVENTS_KEY = "ct.events"
 const QUEUE_KEY = "ct.queue"
+
+/** Why the last refresh failed: no connection at all, or the Sheet's side had a problem. */
+export type SyncError = { kind: "network" | "server"; message: string }
 
 /** A change that hasn't reached the Sheet yet because the phone was offline. */
 type QueuedOp = { op: "save"; event: LogEvent } | { op: "delete"; id: string }
@@ -63,7 +67,7 @@ export function useTracker(conn: Connection) {
   const [days, setDays] = useState(7)
   const [loadedDays, setLoadedDays] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<SyncError | null>(null)
   const pending = useRef(0)
   // Bumped on every save or delete, so a poll that started before one can't overwrite it.
   const mutations = useRef(0)
@@ -88,6 +92,21 @@ export function useTracker(conn: Connection) {
     [setQueue],
   )
 
+  /**
+   * The Sheet stopped accepting this code, for example after its `active` cell was set to FALSE. Forget the
+   * cached sign-in so the sign-in screen shows. Queued entries stay stored under the code.
+   */
+  const onAuthError = useCallback(
+    (e: unknown) => {
+      if (!isAuthError(e)) return false
+      writeStored(SESSION_KEY, owner, null)
+      setSession(null)
+      setSessionError((e as Error).message)
+      return true
+    },
+    [owner],
+  )
+
   /** Send waiting changes in order. Stops at the first one that still can't get through. */
   const flush = useCallback(async () => {
     if (flushing.current) return
@@ -99,8 +118,12 @@ export function useTracker(conn: Connection) {
           if (next.op === "save") await backend.save(next.event)
           else await backend.remove(next.id)
         } catch (e) {
-          if (isNetworkError(e)) return
-          toast.error(`Couldn't sync an entry: ${(e as Error).message}`)
+          // Offline, or the Sheet hiccuped: keep it and try again on the next poll.
+          if (isRetryable(e)) return
+          // Signed out: keep it for when this code works again.
+          if (onAuthError(e)) return
+          const what = next.op === "save" ? entryName(next.event) : "a deleted entry"
+          toast.error(`Couldn't sync ${what}: ${(e as Error).message}`)
         }
         mutations.current++
         setQueue(queue.current.filter((q) => q !== next))
@@ -108,7 +131,7 @@ export function useTracker(conn: Connection) {
     } finally {
       flushing.current = false
     }
-  }, [backend, setQueue])
+  }, [backend, setQueue, onAuthError])
 
   const loadSession = useCallback(async () => {
     try {
@@ -117,9 +140,9 @@ export function useTracker(conn: Connection) {
       setSessionError(null)
       writeStored(SESSION_KEY, owner, s)
     } catch (e) {
-      setSessionError((e as Error).message)
+      if (!onAuthError(e)) setSessionError((e as Error).message)
     }
-  }, [backend, owner])
+  }, [backend, owner, onAuthError])
 
   const refresh = useCallback(async () => {
     // Skip a poll while a save is in flight so it can't overwrite the optimistic update.
@@ -135,11 +158,11 @@ export function useTracker(conn: Connection) {
       }
       setError(null)
     } catch (e) {
-      setError((e as Error).message)
+      if (!onAuthError(e)) setError({ kind: isNetworkError(e) ? "network" : "server", message: (e as Error).message })
     } finally {
       setLoading(false)
     }
-  }, [backend, days, flush, owner])
+  }, [backend, days, flush, owner, onAuthError])
 
   useEffect(() => {
     loadSession()
@@ -187,9 +210,14 @@ export function useTracker(conn: Connection) {
         const saved = await backend.save(event)
         setEvents((list) => [...list.filter((e) => e.id !== saved.id), saved])
       } catch (e) {
-        if (isNetworkError(e)) {
+        if (isRetryable(e)) {
           enqueue({ op: "save", event })
           toast.info("Saved on this phone. It will sync when the connection is back.")
+          return
+        }
+        if (isAuthError(e)) {
+          enqueue({ op: "save", event })
+          onAuthError(e)
           return
         }
         // Undo just this change, leaving anything saved in the meantime alone.
@@ -203,7 +231,7 @@ export function useTracker(conn: Connection) {
         pending.current--
       }
     },
-    [backend, enqueue, flush],
+    [backend, enqueue, flush, onAuthError],
   )
 
   const remove = useCallback(
@@ -223,8 +251,9 @@ export function useTracker(conn: Connection) {
         }
         await backend.remove(id)
       } catch (e) {
-        if (isNetworkError(e)) {
+        if (isRetryable(e) || isAuthError(e)) {
           enqueue({ op: "delete", id })
+          onAuthError(e)
           return
         }
         setEvents((list) => (removed && !list.some((x) => x.id === id) ? [...list, removed] : list))
@@ -233,7 +262,7 @@ export function useTracker(conn: Connection) {
         pending.current--
       }
     },
-    [backend, enqueue, flush],
+    [backend, enqueue, flush, onAuthError],
   )
 
   // Fill gaps from defaults so an older Sheet script without newer settings still works.

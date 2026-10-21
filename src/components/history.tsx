@@ -20,11 +20,11 @@ function initials(name: string) {
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?"
 }
 
-const FILTERS: { value: "all" | EventType; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "feeding", label: "Feeds" },
-  { value: "diaper", label: "Diapers" },
-  { value: "med", label: "Meds" },
+const FILTERS: { value: "all" | EventType; label: string; empty: string }[] = [
+  { value: "all", label: "All", empty: "Nothing was logged" },
+  { value: "feeding", label: "Feeds", empty: "No feeds" },
+  { value: "diaper", label: "Diapers", empty: "No diapers" },
+  { value: "med", label: "Meds", empty: "No meds" },
 ]
 
 export function History({
@@ -32,6 +32,7 @@ export function History({
   unit,
   days,
   loadedDays,
+  failed,
   onOpen,
   onLoadMore,
 }: {
@@ -39,10 +40,12 @@ export function History({
   unit: Unit
   days: number
   loadedDays: number
+  /** The last refresh failed, so older entries aren't on their way. Tapping again retries. */
+  failed: boolean
   onOpen: (draft: Draft) => void
   onLoadMore: () => void
 }) {
-  const loadingMore = loadedDays > 0 && loadedDays < days
+  const loadingMore = loadedDays > 0 && loadedDays < days && !failed
   const [filter, setFilter] = useState<"all" | EventType>("all")
 
   const groups = useMemo(() => {
@@ -79,7 +82,8 @@ export function History({
             </EmptyMedia>
             <EmptyTitle>Nothing here yet</EmptyTitle>
             <EmptyDescription>
-              Nothing was logged in the last {days} days. Entries from every caregiver show up here.
+              {FILTERS.find((f) => f.value === filter)?.empty} in the last {loadedDays || days} days. Entries from every
+              caregiver show up here.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

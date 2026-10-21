@@ -20,16 +20,24 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useNow } from "@/hooks/use-now"
-import { analyze, bucketSize, type Analysis, type Range } from "@/lib/analytics"
+import { analyze, bucketSize, type Range } from "@/lib/analytics"
+import { per, rangeLabel, summaryText } from "@/lib/summary"
 import { formatDuration, HOUR } from "@/lib/time"
 import type { LogEvent } from "@/lib/types"
 import { formatAmount, toDisplay, type Unit } from "@/lib/units"
 
 type Preset = "24h" | "7d" | "custom"
+
+/** The chosen range. The app holds it, so it survives switching tabs. */
+export interface ReportRange {
+  preset: Preset
+  custom?: DateRange
+}
 
 const feedChart = {
   breast: { label: "Breast", color: "var(--chart-1)" },
@@ -58,52 +66,26 @@ function rangeFor(preset: Preset, custom: DateRange | undefined, now: number): R
   return { from: from.getTime(), to: Math.min(to.getTime(), now), live: to.getTime() >= now }
 }
 
-function rangeLabel(range: Range) {
-  const from = new Date(range.from)
-  const to = new Date(range.to)
-  if (range.to - range.from <= 25 * HOUR) return `${format(from, "MMM d, h:mm a")} to ${format(to, "MMM d, h:mm a")}`
-  return `${format(from, "MMM d")} to ${format(to, "MMM d, yyyy")}`
-}
-
-const per = (n: number, days: number) => (days >= 1.5 ? `${n.toFixed(1)} per day` : `in ${Math.round(days * 24)} hours`)
-
-function summaryText(name: string, range: Range, a: Analysis, unit: Unit) {
-  const f = a.feeding
-  const d = a.diaper
-  const lines = [
-    `${name}: ${rangeLabel(range)}`,
-    "",
-    `Feedings: ${f.count} (${per(f.perDay, a.days)})`,
-    f.avgInterval ? `  Average time between feeds: ${formatDuration(f.avgInterval)}` : "",
-    f.longestGap.ms ? `  Longest gap: ${formatDuration(f.longestGap.ms)}` : "",
-    `  Breast: ${f.breastCount}${f.avgBreastMs ? `, average ${formatDuration(f.avgBreastMs)}` : ""}`,
-    `  Bottle: ${f.bottleCount}, ${formatAmount(f.bottleMl, unit)} total${a.days >= 1.5 ? ` (${formatAmount(f.bottleMlPerDay, unit)} per day)` : ""}`,
-    "",
-    `Wet diapers: ${d.wet} (${per(d.wetPerDay, a.days)})`,
-    `Stools: ${d.stool} (${per(d.stoolPerDay, a.days)})`,
-    d.longestWithoutWet.ms
-      ? `Longest without a wet diaper: ${formatDuration(d.longestWithoutWet.ms)}${d.longestWithoutWet.ongoing ? " (still going)" : ""}`
-      : "",
-    d.longestWithoutStool.ms
-      ? `Longest without a stool: ${formatDuration(d.longestWithoutStool.ms)}${d.longestWithoutStool.ongoing ? " (still going)" : ""}`
-      : "",
-  ]
-  return lines.filter((l, i) => l !== "" || lines[i - 1] !== "").join("\n")
-}
-
 export function Reports({
   events,
   unit,
   babyName,
+  loadedDays,
   onEnsureDays,
+  selected,
+  onSelect,
 }: {
   events: LogEvent[]
   unit: Unit
   babyName: string
+  /** How many days back the app has loaded so far. */
+  loadedDays: number
   onEnsureDays: (days: number) => void
+  selected: ReportRange
+  onSelect: (range: ReportRange) => void
 }) {
-  const [preset, setPreset] = useState<Preset>("7d")
-  const [custom, setCustom] = useState<DateRange | undefined>()
+  const { preset, custom } = selected
+  const setPreset = (p: Preset) => onSelect({ ...selected, preset: p })
   const [pickerOpen, setPickerOpen] = useState(false)
 
   // Ticks every minute so a range that ends "now" keeps up while the tab stays open.
@@ -124,6 +106,9 @@ export function Reports({
       toast.error("Couldn't copy on this device.")
     }
   }
+
+  // Stats for older dates would be partial until those days arrive.
+  const loadingOlder = Date.now() - loadedDays * 24 * HOUR > range.from
 
   const hourly = bucketSize(range) === "hour"
   const unitLabel = hourly ? "hour" : "day"
@@ -153,10 +138,7 @@ export function Reports({
               <Calendar
                 mode="range"
                 selected={custom}
-                onSelect={(r) => {
-                  setCustom(r)
-                  setPreset("custom")
-                }}
+                onSelect={(r) => onSelect({ preset: "custom", custom: r })}
                 disabled={{ after: new Date() }}
                 defaultMonth={custom?.from}
                 autoFocus
@@ -170,7 +152,15 @@ export function Reports({
           </Popover>
         </ToggleGroup>
         <div className="flex items-center justify-between gap-2">
-          <p className="text-muted-foreground text-sm">{rangeLabel(range)}</p>
+          <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
+            {loadingOlder ? (
+              <>
+                <Spinner className="size-3.5" /> Loading older entries
+              </>
+            ) : (
+              rangeLabel(range)
+            )}
+          </p>
           <Button variant="outline" size="sm" onClick={copySummary}>
             <ClipboardCopy /> Copy summary
           </Button>

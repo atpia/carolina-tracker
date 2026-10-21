@@ -30,11 +30,16 @@ var DEFAULT_SETTINGS = [
   ['announceEntries', false, 'Also post every new entry to Discord'],
 ];
 var DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
+var TEXT_FIELDS = { id: true, type: true, kind: true, notes: true, by: true, updatedBy: true };
 var NUMBER_FIELDS = { amountStartMl: true, amountEndMl: true, percent: true, confidence: true, doseMg: true };
 var EDITABLE_FIELDS = [
   'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent', 'confidence', 'doseMg', 'notes',
 ];
-var TYPES = { feeding: true, diaper: true, med: true };
+var KINDS = {
+  feeding: { left: true, right: true, both: true, formula: true, expressed: true },
+  diaper: { wet: true, stool: true, both: true, dry: true },
+  med: { ibuprofen: true, tylenol: true },
+};
 
 // ---------------------------------------------------------------------------
 // Menu and one-time setup
@@ -57,6 +62,8 @@ function setup() {
   events.getRange('L:M').setNumberFormat('yyyy-mm-dd h:mm am/pm');
 
   var users = ensureSheet_(ss, 'Users', USER_HEADERS);
+  // A Users tab from an older version may be missing the setupLink header.
+  users.getRange(1, 1, 1, USER_HEADERS.length).setValues([USER_HEADERS]).setFontWeight('bold');
   users.setFrozenRows(1);
   if (users.getLastRow() < 2) {
     users.getRange(2, 1, 3, 3).setValues([
@@ -90,12 +97,13 @@ function onOpen() {
     .addItem('3. Turn on Discord reminders', 'enableReminders')
     .addSeparator()
     .addItem('Send a test Discord message', 'testDiscord')
-    .addItem('Turn off Discord reminders', 'disableReminders')
+    .addItem('Turn off Discord reminders', 'turnOffReminders')
     .addToUi();
 }
 
 function refreshSetupLinks() {
-  var settings = readSettings_();
+  // Defaults fill a cleared appUrl, so a link can't start with "#api=".
+  var settings = settingsWithDefaults_();
   var webAppUrl = String(settings.apiUrl || '').trim();
   var sheet = SpreadsheetApp.getActive().getSheetByName('Users');
   if (!sheet || sheet.getLastRow() < 2) return;
@@ -105,7 +113,9 @@ function refreshSetupLinks() {
     return [String(settings.appUrl) + '#api=' + encodeURIComponent(webAppUrl) + '&code=' + encodeURIComponent(r[1])];
   });
   sheet.getRange(2, 4, links.length, 1).setValues(links);
-  if (webAppUrl) toast_('Setup links updated. Send each person only their own link.');
+  toast_(webAppUrl
+    ? 'Setup links updated. Send each person only their own link.'
+    : 'Paste the web app URL into Settings → apiUrl first.');
 }
 
 function ensureSheet_(ss, name, headers) {
@@ -147,7 +157,12 @@ function doPost(e) {
     var user = authenticate_(req.code);
     out = { ok: true, result: handle_(req, user) };
   } catch (err) {
-    out = { ok: false, error: String(err && err.message ? err.message : err) };
+    var message = String(err && err.message ? err.message : err);
+    out = { ok: false, error: message };
+    // The app keeps the entry and tries again later instead of dropping it.
+    if ((err && err.retry) || isServiceError_(message)) out.retry = true;
+    // The app signs this phone out and keeps its unsynced entries.
+    if (err && err.auth) out.auth = true;
   }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -159,7 +174,10 @@ function handle_(req, user) {
     case 'list':
       return listEvents_(Number(req.days) || 7);
     case 'save':
-      return withLock_(function () { return saveEvent_(req.event, user); });
+      var saved = withLock_(function () { return saveEvent_(req.event, user); });
+      // Posting to Discord after the lock is released keeps a slow Discord from holding up other phones.
+      if (saved.created) announce_(saved.event);
+      return saved.event;
     case 'delete':
       return withLock_(function () { return deleteEvent_(req.id, user); });
     default:
@@ -173,7 +191,9 @@ function authenticate_(code) {
   if (!match) {
     // Slow down guessing.
     Utilities.sleep(1500);
-    throw new Error('That code is not valid. Ask for your personal setup link.');
+    var err = new Error('That code is not valid. Ask for your personal setup link.');
+    err.auth = true;
+    throw err;
   }
   return match.name;
 }
@@ -218,9 +238,24 @@ function clientSettings_() {
   };
 }
 
+/** Google's own temporary failures, such as "Service Spreadsheets timed out". Worth retrying. */
+function isServiceError_(message) {
+  return /^(Exception: )?Service\b|timed out|temporarily unavailable|try again later/i.test(message);
+}
+
+function retryable_(message) {
+  var err = new Error(message);
+  err.retry = true;
+  return err;
+}
+
 function withLock_(fn) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  try {
+    lock.waitLock(20000);
+  } catch (e) {
+    throw retryable_('The Sheet is busy. Try again in a moment.');
+  }
   try {
     return fn();
   } finally {
@@ -242,9 +277,15 @@ function rowToEvent_(row) {
   EVENT_HEADERS.forEach(function (h, i) {
     var v = row[i];
     if (v === '' || v === null) return;
-    if (DATE_FIELDS[h]) v = v instanceof Date ? v.toISOString() : new Date(v).toISOString();
-    else if (NUMBER_FIELDS[h]) v = Number(v);
-    else if (h !== 'deleted') v = String(v);
+    // A hand-typed cell that isn't a date or a number is left out rather than breaking every phone's list.
+    if (DATE_FIELDS[h]) {
+      var ms = time_(v);
+      if (!ms) return;
+      v = new Date(ms).toISOString();
+    } else if (NUMBER_FIELDS[h]) {
+      v = Number(v);
+      if (isNaN(v)) return;
+    } else if (h !== 'deleted') v = String(v);
     e[h] = v;
   });
   return e;
@@ -255,8 +296,9 @@ function eventToRow_(e) {
     var v = e[h];
     if (v === undefined || v === null) return '';
     if (DATE_FIELDS[h]) return v ? new Date(v) : '';
-    // A leading apostrophe stops the Sheet reading text like "=2 oz" as a formula. It isn't part of the value.
-    if (typeof v === 'string' && /^[=+\-@]/.test(v)) return "'" + v;
+    // A leading apostrophe keeps text as typed: without it the Sheet turns "3/4" into a date, "10:30" into a
+    // time, "007" into 7 and "=2 oz" into a formula. It isn't part of the value read back.
+    if (TEXT_FIELDS[h] && v !== '') return "'" + String(v);
     return v;
   });
 }
@@ -279,11 +321,16 @@ function listEvents_(days) {
     var start = Math.max(2, end - SCAN_CHUNK + 1);
     var rows = sheet.getRange(start, 1, end - start + 1, EVENT_HEADERS.length).getValues();
     var recent = false;
-    rows.forEach(function (row) {
+    rows.forEach(function (row, i) {
       var touched = Math.max(time_(row[created]), time_(row[updated]));
       if (touched >= since || !touched) recent = true;
       var e = rowToEvent_(row);
-      if (!e.id || truthy_(e.deleted) || new Date(e.start).getTime() < since) return;
+      if (!e.id || truthy_(e.deleted)) return;
+      if (!e.start) {
+        Logger.log('Skipping Events row ' + (start + i) + ': the start time is not a date.');
+        return;
+      }
+      if (new Date(e.start).getTime() < since) return;
       delete e.deleted;
       out.push(e);
     });
@@ -306,11 +353,27 @@ function findRow_(id) {
 }
 
 function validate_(e) {
-  if (!e || !TYPES[e.type]) throw new Error('Unknown entry type');
+  if (!e || !KINDS.hasOwnProperty(e.type)) throw new Error('Unknown entry type');
   if (!e.kind) throw new Error('Missing entry kind');
+  if (!KINDS[e.type].hasOwnProperty(e.kind)) throw new Error('Unknown kind for this entry type');
   if (!e.start || isNaN(new Date(e.start).getTime())) throw new Error('Missing start time');
+  // Ten minutes of slack for phone clocks. listEvents_ also counts on entries not starting in the future.
+  if (new Date(e.start).getTime() > Date.now() + 10 * 60000) throw new Error('The start time is in the future');
   if (e.end && isNaN(new Date(e.end).getTime())) throw new Error('Bad end time');
   if (e.notes && String(e.notes).length > 1000) throw new Error('Notes are too long');
+  checkNumber_(e.percent, 0, 100, 'Percent');
+  checkNumber_(e.confidence, 1, 5, 'Confidence');
+  checkNumber_(e.amountStartMl, 0, Infinity, 'Amount offered');
+  checkNumber_(e.amountEndMl, 0, Infinity, 'Amount left over');
+  checkNumber_(e.doseMg, 0, Infinity, 'Dose');
+}
+
+function checkNumber_(v, min, max, name) {
+  if (v === undefined || v === null || v === '') return;
+  var n = Number(v);
+  if (isNaN(n) || n < min || n > max) {
+    throw new Error(name + (max === Infinity ? " can't be negative" : ' must be between ' + min + ' and ' + max));
+  }
 }
 
 function saveEvent_(input, user) {
@@ -331,10 +394,9 @@ function saveEvent_(input, user) {
     event = { id: String(input.id || Utilities.getUuid()), by: user, createdAt: now, updatedAt: now };
     EDITABLE_FIELDS.forEach(function (f) { event[f] = input[f]; });
     sheet.appendRow(eventToRow_(event));
-    announce_(event);
   }
   delete event.deleted;
-  return event;
+  return { event: event, created: !row };
 }
 
 function deleteEvent_(id, user) {
@@ -367,13 +429,19 @@ function ts_(ms, style) {
   return '<t:' + Math.floor(ms / 1000) + ':' + (style || 't') + '>';
 }
 
-function postDiscord_(content) {
-  var url = String(settingsWithDefaults_().discordWebhook || '').trim();
+function postDiscord_(content, settings) {
+  var s = settings || settingsWithDefaults_();
+  var url = String(s.discordWebhook || '').trim();
   if (!url) return false;
   var res = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ content: content, username: settingsWithDefaults_().babyName + ' tracker' }),
+    payload: JSON.stringify({
+      content: content,
+      username: s.babyName + ' tracker',
+      // A name or note containing @everyone or a role mention can't ping the whole server.
+      allowed_mentions: { parse: [] },
+    }),
     muteHttpExceptions: true,
   });
   return res.getResponseCode() < 300;
@@ -383,7 +451,7 @@ function announce_(e) {
   var s = settingsWithDefaults_();
   if (!truthy_(s.announceEntries)) return;
   try {
-    postDiscord_('📝 ' + e.by + ' logged **' + label_(e) + '** at ' + ts_(new Date(e.start).getTime()));
+    postDiscord_('📝 ' + e.by + ' logged **' + label_(e) + '** at ' + ts_(new Date(e.start).getTime()), s);
   } catch (err) {
     Logger.log(err);
   }
@@ -399,9 +467,19 @@ function testDiscord() {
 }
 
 function enableReminders() {
+  if (!String(settingsWithDefaults_().discordWebhook || '').trim()) {
+    toast_('Paste a Discord webhook URL into Settings → discordWebhook first, then turn reminders on.');
+    return;
+  }
   disableReminders();
   ScriptApp.newTrigger('checkReminders').timeBased().everyMinutes(5).create();
   toast_('Discord reminders are on. They are checked every 5 minutes.');
+}
+
+/** The menu item. disableReminders stays silent so enableReminders can reuse it. */
+function turnOffReminders() {
+  disableReminders();
+  toast_('Discord reminders are off.');
 }
 
 function disableReminders() {
@@ -417,6 +495,9 @@ function latest_(events, pred) {
   });
   return best;
 }
+
+/** Matches STALE_TIMER_MS in the app's src/lib/derive.ts. */
+var STALE_TIMER_H = 3;
 
 /** Runs every 5 minutes from a trigger. Each reminder is sent once per entry. */
 function checkReminders() {
@@ -438,9 +519,12 @@ function checkReminders() {
 
   if (truthy_(s.remindFeeding)) {
     var feed = latest_(events, function (e) { return e.type === 'feeding'; });
-    if (feed) {
-      // Count from when the feed ended, or its start while it is still going.
-      var ended = new Date(feed.end || feed.start).getTime();
+    if (feed && !feed.end) {
+      // Still going: no window yet, the same as the app. A timer this old was probably never stopped.
+      once('feedstale:' + feed.id, new Date(feed.start).getTime() + STALE_TIMER_H * H,
+        '⏱️ Feeding timer has been running ' + STALE_TIMER_H + ' hours. Did someone forget to stop it?');
+    } else if (feed) {
+      var ended = new Date(feed.end).getTime();
       var by = ended + Number(s.feedMaxH) * H;
       var key = feed.id + ':' + ended;
       once('feedopen:' + key, ended + Number(s.feedMinH) * H,
@@ -470,7 +554,7 @@ function checkReminders() {
     }
   }
 
-  if (messages.length && postDiscord_(messages.join('\n'))) {
+  if (messages.length && postDiscord_(messages.join('\n'), s)) {
     props.setProperty('sentReminders', JSON.stringify(sent.slice(-100)));
   }
 }

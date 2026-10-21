@@ -9,9 +9,12 @@ import {
   Settings as SettingsIcon,
   UserRound,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Dashboard } from "@/components/dashboard"
 import { EntrySheet, type Draft } from "@/components/entry-sheet"
+import { ErrorBoundary } from "@/components/error-boundary"
+import type { ReportRange } from "@/components/reports"
 import { History } from "@/components/history"
 import { SettingsView, type Theme } from "@/components/settings-view"
 import { SetupScreen } from "@/components/setup-screen"
@@ -22,13 +25,33 @@ import { Spinner } from "@/components/ui/spinner"
 import { Toaster } from "@/components/ui/sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useLocalState } from "@/hooks/use-local-state"
+import { useNow } from "@/hooks/use-now"
 import { useTracker } from "@/hooks/use-tracker"
 import { loadConnection, saveConnection, type Connection } from "@/lib/api"
+import { clearAutoReload } from "@/lib/chunk"
 import { deriveStatus } from "@/lib/derive"
 import type { Unit } from "@/lib/units"
 
 // Reports pulls in the chart library, the bulk of the app's size, so it loads only when opened.
-const Reports = lazy(() => import("@/components/reports").then((m) => ({ default: m.Reports })))
+const loadReports = () =>
+  import("@/components/reports").then((m) => {
+    clearAutoReload()
+    return m
+  })
+const Reports = lazy(() => loadReports().then((m) => ({ default: m.Reports })))
+
+/** Fetch the Reports code once the app is idle, so the service worker has it cached for offline use. */
+function useWarmReports() {
+  useEffect(() => {
+    const warm = () => loadReports().catch(() => {})
+    if ("requestIdleCallback" in window) {
+      const id = requestIdleCallback(warm, { timeout: 10_000 })
+      return () => cancelIdleCallback(id)
+    }
+    const id = setTimeout(warm, 3000)
+    return () => clearTimeout(id)
+  }, [])
+}
 
 /** A setup link looks like …/#api=<script url>&code=<personal code>. */
 function connectionFromHash(): Connection | null {
@@ -96,7 +119,14 @@ function Tracker({
   const [unit, setUnit] = useLocalState<Unit>("ct.unit", "ml")
   const [tab, setTab] = useLocalState("ct.tab", "now")
   const [draft, setDraft] = useState<Draft | null>(null)
-  const status = useMemo(() => deriveStatus(tracker.events, tracker.settings), [tracker.events, tracker.settings])
+  const [reportRange, setReportRange] = useState<ReportRange>({ preset: "7d" })
+  useWarmReports()
+  // A one-minute tick keeps "today", forgotten timers and 24-hour med counts current even when no new data arrives.
+  const minute = useNow(60_000)
+  const status = useMemo(
+    () => deriveStatus(tracker.events, tracker.settings, minute),
+    [tracker.events, tracker.settings, minute],
+  )
 
   if (tracker.sessionError) {
     return (
@@ -104,7 +134,16 @@ function Tracker({
         <Alert variant="destructive">
           <CloudOff />
           <AlertTitle>Couldn't sign in</AlertTitle>
-          <AlertDescription>{tracker.sessionError}</AlertDescription>
+          <AlertDescription>
+            <p>{tracker.sessionError}</p>
+            {tracker.queued > 0 && (
+              <p>
+                {tracker.queued === 1 ? "1 entry" : `${tracker.queued} entries`} on this phone{" "}
+                {tracker.queued === 1 ? "hasn't" : "haven't"} synced. They'll sync if you sign back in with the same
+                code.
+              </p>
+            )}
+          </AlertDescription>
         </Alert>
         <Button onClick={() => location.reload()}>
           <RefreshCw /> Try again
@@ -128,8 +167,15 @@ function Tracker({
             </span>
           )}
           {tracker.error && !tracker.loading && (
-            <button className="text-destructive flex items-center gap-1" onClick={tracker.refresh}>
-              <CloudOff className="size-3.5" /> Offline, tap to retry
+            <button
+              className="text-destructive flex items-center gap-1"
+              onClick={() => {
+                if (tracker.error?.kind === "server") toast.error(tracker.error.message)
+                tracker.refresh()
+              }}
+            >
+              <CloudOff className="size-3.5" />{" "}
+              {tracker.error.kind === "network" ? "Offline, tap to retry" : "Sync problem, tap to retry"}
             </button>
           )}
           {tracker.user && (
@@ -166,19 +212,28 @@ function Tracker({
             unit={unit}
             days={tracker.days}
             loadedDays={tracker.loadedDays}
+            failed={tracker.error !== null}
             onOpen={setDraft}
             onLoadMore={tracker.loadMore}
           />
         </TabsContent>
         <TabsContent value="reports" className="min-w-0">
-          <Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
-            <Reports
-              events={tracker.events}
-              unit={unit}
-              babyName={tracker.settings.babyName}
-              onEnsureDays={tracker.ensureDays}
-            />
-          </Suspense>
+          <ErrorBoundary
+            title="Reports couldn't load"
+            description="This usually happens right after an update, or when the phone is offline. Reload to try again."
+          >
+            <Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
+              <Reports
+                events={tracker.events}
+                unit={unit}
+                babyName={tracker.settings.babyName}
+                loadedDays={tracker.loadedDays}
+                onEnsureDays={tracker.ensureDays}
+                selected={reportRange}
+                onSelect={setReportRange}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </TabsContent>
         <TabsContent value="settings">
           <SettingsView
@@ -191,6 +246,7 @@ function Tracker({
             theme={theme}
             onTheme={onTheme}
             onSignOut={onSignOut}
+            queued={tracker.queued}
           />
         </TabsContent>
       </main>
@@ -211,6 +267,7 @@ function Tracker({
         onDelete={tracker.remove}
         user={tracker.user}
         unit={unit}
+        demo={conn.api === "demo"}
       />
     </Tabs>
   )
