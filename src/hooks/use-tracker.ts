@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
-import { createBackend, isNetworkError, type Connection } from "@/lib/api"
+import { createBackend, isRetryable, type Connection } from "@/lib/api"
 import { DEFAULT_SETTINGS, type LogEvent, type Session } from "@/lib/types"
 
 const POLL_MS = 30_000
@@ -99,7 +99,8 @@ export function useTracker(conn: Connection) {
           if (next.op === "save") await backend.save(next.event)
           else await backend.remove(next.id)
         } catch (e) {
-          if (isNetworkError(e)) return
+          // Offline, or the Sheet hiccuped: keep it and try again on the next poll.
+          if (isRetryable(e)) return
           toast.error(`Couldn't sync an entry: ${(e as Error).message}`)
         }
         mutations.current++
@@ -187,7 +188,7 @@ export function useTracker(conn: Connection) {
         const saved = await backend.save(event)
         setEvents((list) => [...list.filter((e) => e.id !== saved.id), saved])
       } catch (e) {
-        if (isNetworkError(e)) {
+        if (isRetryable(e)) {
           enqueue({ op: "save", event })
           toast.info("Saved on this phone. It will sync when the connection is back.")
           return
@@ -223,7 +224,7 @@ export function useTracker(conn: Connection) {
         }
         await backend.remove(id)
       } catch (e) {
-        if (isNetworkError(e)) {
+        if (isRetryable(e)) {
           enqueue({ op: "delete", id })
           return
         }

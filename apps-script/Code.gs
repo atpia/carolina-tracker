@@ -147,7 +147,10 @@ function doPost(e) {
     var user = authenticate_(req.code);
     out = { ok: true, result: handle_(req, user) };
   } catch (err) {
-    out = { ok: false, error: String(err && err.message ? err.message : err) };
+    var message = String(err && err.message ? err.message : err);
+    out = { ok: false, error: message };
+    // The app keeps the entry and tries again later instead of dropping it.
+    if ((err && err.retry) || isServiceError_(message)) out.retry = true;
   }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -218,9 +221,24 @@ function clientSettings_() {
   };
 }
 
+/** Google's own temporary failures, such as "Service Spreadsheets timed out". Worth retrying. */
+function isServiceError_(message) {
+  return /^(Exception: )?Service\b|timed out|temporarily unavailable|try again later/i.test(message);
+}
+
+function retryable_(message) {
+  var err = new Error(message);
+  err.retry = true;
+  return err;
+}
+
 function withLock_(fn) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  try {
+    lock.waitLock(20000);
+  } catch (e) {
+    throw retryable_('The Sheet is busy. Try again in a moment.');
+  }
   try {
     return fn();
   } finally {
