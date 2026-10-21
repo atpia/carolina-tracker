@@ -22,7 +22,7 @@ import { Progress } from "@/components/ui/progress"
 import { useNow } from "@/hooks/use-now"
 import { newId } from "@/lib/api"
 import type { Status } from "@/lib/derive"
-import { formatClock, formatDuration, formatTimer, relative } from "@/lib/time"
+import { formatClock, formatClockRange, formatDuration, formatTimer, relative } from "@/lib/time"
 import { MED_LABELS, isBottle, type DiaperKind, type LogEvent, type MedKind } from "@/lib/types"
 import { formatAmount, type Unit } from "@/lib/units"
 import { cn } from "@/lib/utils"
@@ -200,8 +200,11 @@ function FeedingCard({
               className="hover:bg-muted -mx-2 rounded-md px-2 py-1 text-left text-sm"
               onClick={() => onOpen({ ...lastFeed, edit: true })}
             >
-              <span className="font-medium">Last: {eventTitle(lastFeed)}</span> at {formatClock(lastFeed.start)} (
-              {relative(t(lastFeed.start), now)})
+              {/* The window counts from the end, so show it when there is one. */}
+              <span className="font-medium">Last: {eventTitle(lastFeed)}</span>{" "}
+              {lastFeed.end
+                ? `${formatClockRange(lastFeed.start, lastFeed.end)} (ended ${relative(t(lastFeed.end), now)})`
+                : `at ${formatClock(lastFeed.start)} (${relative(t(lastFeed.start), now)})`}
               <span className="text-muted-foreground block">
                 {[eventDetails(lastFeed, unit), `by ${lastFeed.by}`].filter(Boolean).join(" · ")}
               </span>
@@ -253,9 +256,11 @@ function DiaperCard({
   babyName: string
   now: number
   onOpen: (draft: Draft) => void
-  quickLog: (partial: Pick<LogEvent, "type" | "kind">, message: string) => void
+  quickLog: (partial: Pick<LogEvent, "type" | "kind">, message: string) => Promise<void>
 }) {
   const { lastChange, lastCheck, lastWet, lastStool, nextCheck } = status
+  // The button just tapped stays disabled until its save finishes, so a double tap logs one diaper.
+  const [busy, setBusy] = useState<DiaperKind | null>(null)
   const due = nextCheck !== undefined && now >= nextCheck
   const headline = !nextCheck
     ? "No diaper checks yet"
@@ -263,7 +268,14 @@ function DiaperCard({
       ? `Time to check ${babyName}'s diaper`
       : `Next check ${relative(nextCheck, now)}`
 
-  const log = (kind: DiaperKind, label: string) => quickLog({ type: "diaper", kind }, label)
+  async function log(kind: DiaperKind, label: string) {
+    setBusy(kind)
+    try {
+      await quickLog({ type: "diaper", kind }, label)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   return (
     <Card>
@@ -316,6 +328,7 @@ function DiaperCard({
                 key={kind}
                 size="lg"
                 variant={kind === "dry" ? "outline" : "secondary"}
+                disabled={busy === kind}
                 onClick={() => log(kind, toast)}
               >
                 <Icon /> {label}
@@ -337,7 +350,7 @@ function MedCard({
   status: Status
   now: number
   onOpen: (draft: Draft) => void
-  quickLog: (partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) => void
+  quickLog: (partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) => Promise<void>
 }) {
   const { nextMedKind, nextMedAt, lastMed, meds } = status
   const [confirm, setConfirm] = useState<{ kind: MedKind; reason: string } | null>(null)
@@ -455,7 +468,7 @@ function TodayCard({ status, unit }: { status: Status; unit: Unit }) {
   const { targets } = status
   const stats = [
     { label: "Feeds", value: feeds, goal: targets.feeds },
-    { label: "Bottle", value: bottleMl ? formatAmount(bottleMl, unit) : "0" },
+    { label: "Bottle", value: formatAmount(bottleMl, unit) },
     { label: "Wet", value: wet, goal: targets.wet },
     { label: "Stool", value: stool },
   ]

@@ -23,6 +23,14 @@ export function formatClock(iso: string | number | Date) {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
 }
 
+/** "1:00 to 1:25 AM": the AM/PM shows once when both times share it. */
+export function formatClockRange(start: string | number | Date, end: string | number | Date) {
+  const a = formatClock(start)
+  const b = formatClock(end)
+  const suffix = a.match(/\s*[^\d\s:.]+\.?$/)?.[0]
+  return suffix && b.endsWith(suffix) ? `${a.slice(0, -suffix.length)} to ${b}` : `${a} to ${b}`
+}
+
 export function formatDay(iso: string | number | Date) {
   const d = new Date(iso)
   const today = new Date()
