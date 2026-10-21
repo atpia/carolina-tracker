@@ -67,6 +67,9 @@ const TITLES: Record<EventType, string> = {
   med: "mom's medication",
 }
 
+/** The Sheet script refuses longer notes. */
+const NOTES_MAX = 1000
+
 /** One-tap feed lengths for logging a feed after it's over. */
 const DURATIONS = [10, 15, 20, 30]
 
@@ -458,7 +461,13 @@ export function EntrySheet({
                     onChange={(e) => set({ notes: e.target.value || undefined })}
                     placeholder="Optional"
                     rows={2}
+                    maxLength={NOTES_MAX}
                   />
+                  {(event.notes?.length ?? 0) > NOTES_MAX - 100 && (
+                    <FieldDescription className="text-right tabular-nums">
+                      {event.notes?.length ?? 0}/{NOTES_MAX}
+                    </FieldDescription>
+                  )}
                 </Field>
               </FieldGroup>
               <button type="submit" hidden disabled={errors.length > 0} />
