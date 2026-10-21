@@ -66,6 +66,8 @@ const TITLES: Record<EventType, string> = {
   med: "mom's medication",
 }
 
+type BottleMode = "left" | "percent" | "amount"
+
 const CONFIDENCE_ICONS: LucideIcon[] = [Frown, Annoyed, Meh, Smile, Laugh]
 
 function parseNum(value: string) {
@@ -109,7 +111,7 @@ export function EntrySheet({
   unit: Unit
 }) {
   const [event, setEvent] = useState<LogEvent | null>(null)
-  const [bottleMode, setBottleMode] = useState<"left" | "percent">("left")
+  const [bottleMode, setBottleMode] = useState<BottleMode>("left")
   const [saving, setSaving] = useState(false)
   const editing = Boolean(draft?.edit)
 
@@ -129,8 +131,10 @@ export function EntrySheet({
     if (out.type !== "feeding") delete out.end
     if (out.type === "feeding" && isBottle(out.kind)) {
       delete out.confidence
-      if (bottleMode === "left") delete out.percent
-      else delete out.amountEndMl
+      if (bottleMode === "percent") delete out.amountEndMl
+      else delete out.percent
+      // A typed amount is stored as a bottle that was finished, so every report reads it the same way.
+      if (bottleMode === "amount") out.amountEndMl = 0
     } else {
       delete out.amountStartMl
       delete out.amountEndMl
@@ -151,7 +155,7 @@ export function EntrySheet({
   const bottle = event?.type === "feeding" && isBottle(event.kind)
   const drank =
     event && bottle
-      ? consumedMl({ ...event, ...(bottleMode === "left" ? { percent: undefined } : { amountEndMl: undefined }) })
+      ? consumedMl({ ...event, ...(bottleMode === "percent" ? { amountEndMl: undefined } : { percent: undefined }) })
       : undefined
   const TypeIcon = event ? TYPE_ICONS[event.type] : null
 
@@ -222,46 +226,65 @@ export function EntrySheet({
 
                     {bottle ? (
                       <Field>
-                        <div className="grid grid-cols-2 gap-3">
-                          <Field>
-                            <FieldLabel htmlFor="amt-start">Offered ({unit})</FieldLabel>
-                            <Input
-                              id="amt-start"
-                              inputMode="decimal"
-                              value={toDisplay(event.amountStartMl, unit) ?? ""}
-                              onChange={(e) => set({ amountStartMl: fromDisplay(parseNum(e.target.value), unit) })}
-                              placeholder={unit === "ml" ? "60" : "2"}
-                            />
-                          </Field>
-                          {bottleMode === "left" && (
-                            <Field>
-                              <FieldLabel htmlFor="amt-end">Left over ({unit})</FieldLabel>
-                              <Input
-                                id="amt-end"
-                                inputMode="decimal"
-                                value={toDisplay(event.amountEndMl, unit) ?? ""}
-                                onChange={(e) => set({ amountEndMl: fromDisplay(parseNum(e.target.value), unit) })}
-                                placeholder="0"
-                              />
-                            </Field>
-                          )}
-                        </div>
+                        <FieldTitle>How much did she drink?</FieldTitle>
                         <ToggleGroup
                           type="single"
                           value={bottleMode}
                           onValueChange={(v) => {
                             if (!v) return
-                            setBottleMode(v as "left" | "percent")
+                            setBottleMode(v as BottleMode)
                             if (v === "percent" && event.percent === undefined) set({ percent: 100 })
                           }}
                         >
                           <ToggleGroupItem value="left" className="h-8 text-xs">
-                            Measure what's left
+                            Left over
                           </ToggleGroupItem>
                           <ToggleGroupItem value="percent" className="h-8 text-xs">
-                            Estimate % drank
+                            Estimate %
+                          </ToggleGroupItem>
+                          <ToggleGroupItem value="amount" className="h-8 text-xs">
+                            Type amount
                           </ToggleGroupItem>
                         </ToggleGroup>
+                        {bottleMode === "amount" ? (
+                          <Field>
+                            <FieldLabel htmlFor="amt-drank">Drank ({unit})</FieldLabel>
+                            <Input
+                              id="amt-drank"
+                              inputMode="decimal"
+                              value={toDisplay(event.amountStartMl, unit) ?? ""}
+                              onChange={(e) =>
+                                set({ amountStartMl: fromDisplay(parseNum(e.target.value), unit), amountEndMl: 0 })
+                              }
+                              placeholder={unit === "ml" ? "45" : "1.5"}
+                            />
+                          </Field>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3">
+                            <Field>
+                              <FieldLabel htmlFor="amt-start">Offered ({unit})</FieldLabel>
+                              <Input
+                                id="amt-start"
+                                inputMode="decimal"
+                                value={toDisplay(event.amountStartMl, unit) ?? ""}
+                                onChange={(e) => set({ amountStartMl: fromDisplay(parseNum(e.target.value), unit) })}
+                                placeholder={unit === "ml" ? "60" : "2"}
+                              />
+                            </Field>
+                            {bottleMode === "left" && (
+                              <Field>
+                                <FieldLabel htmlFor="amt-end">Left over ({unit})</FieldLabel>
+                                <Input
+                                  id="amt-end"
+                                  inputMode="decimal"
+                                  value={toDisplay(event.amountEndMl, unit) ?? ""}
+                                  onChange={(e) => set({ amountEndMl: fromDisplay(parseNum(e.target.value), unit) })}
+                                  placeholder="0"
+                                />
+                              </Field>
+                            )}
+                          </div>
+                        )}
                         {bottleMode === "percent" && (
                           <Field className="gap-3 pt-1" data-vaul-no-drag>
                             <div className="flex items-baseline justify-between">
@@ -284,7 +307,7 @@ export function EntrySheet({
                             </div>
                           </Field>
                         )}
-                        {drank !== undefined && (
+                        {drank !== undefined && bottleMode !== "amount" && (
                           <FieldDescription>
                             She drank about <strong className="text-foreground">{formatAmount(drank, unit)}</strong>.
                           </FieldDescription>

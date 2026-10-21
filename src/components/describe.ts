@@ -36,7 +36,8 @@ export function eventDetails(e: LogEvent, unit: Unit) {
     if (isBottle(e.kind)) {
       const drank = consumedMl(e)
       if (drank !== undefined) parts.push(`drank ${formatAmount(drank, unit)}`)
-      if (e.amountStartMl !== undefined) parts.push(`of ${formatAmount(e.amountStartMl, unit)}`)
+      // A finished bottle (or a typed amount) needs no "of" figure.
+      if (e.amountStartMl !== undefined && e.amountEndMl !== 0) parts.push(`of ${formatAmount(e.amountStartMl, unit)}`)
     } else if (e.confidence) {
       parts.push(`${confidenceLabel(e.confidence)} (${e.confidence}/5)`)
     }
