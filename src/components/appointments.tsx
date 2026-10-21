@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from "react"
-import { CalendarCheck, CalendarClock, CalendarPlus, CalendarX, RefreshCw, Trash2 } from "lucide-react"
+import { BookmarkPlus, CalendarCheck, CalendarClock, CalendarPlus, CalendarX, MapPin, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -33,7 +33,7 @@ import { Textarea } from "@/components/ui/textarea"
 import type { Appointments as AppointmentsState } from "@/hooks/use-appointments"
 import { newId } from "@/lib/api"
 import { formatClock, formatClockRange, formatDay, fromLocalInput, HOUR, toLocalInput } from "@/lib/time"
-import type { Appointment } from "@/lib/types"
+import type { Appointment, Place } from "@/lib/types"
 
 /** The Sheet script refuses longer notes. */
 const NOTES_MAX = 1000
@@ -68,6 +68,7 @@ export function Appointments({
 }) {
   const [draft, setDraft] = useState<{ appointment: Appointment; edit: boolean } | null>(null)
   const [showPast, setShowPast] = useState(false)
+  const [placeDraft, setPlaceDraft] = useState<Place | null>(null)
 
   const { upcoming, past } = useMemo(() => {
     const now = Date.now()
@@ -135,12 +136,48 @@ export function Appointments({
           </Button>
         ))}
 
+      <section className="grid gap-1.5 pt-2">
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-muted-foreground text-sm font-semibold">Saved places</h2>
+          <Button variant="ghost" size="sm" onClick={() => setPlaceDraft({ id: newId(), name: "", address: "" })}>
+            <Plus /> Add
+          </Button>
+        </div>
+        {state.places.length === 0 ? (
+          <p className="text-muted-foreground px-1 text-sm">
+            Save places you go often, like the pediatrician, to pick them when making an appointment.
+          </p>
+        ) : (
+          <ItemGroup className="bg-card divide-y overflow-hidden rounded-xl border">
+            {state.places.map((p) => (
+              <Item key={p.id} asChild className="rounded-none">
+                <button onClick={() => setPlaceDraft(p)}>
+                  <ItemContent>
+                    <ItemTitle>{p.name}</ItemTitle>
+                    {p.address && <ItemDescription className="line-clamp-1">{p.address}</ItemDescription>}
+                  </ItemContent>
+                </button>
+              </Item>
+            ))}
+          </ItemGroup>
+        )}
+      </section>
+
       <AppointmentSheet
         draft={draft}
+        places={state.places}
         onClose={() => setDraft(null)}
         onSave={state.save}
         onDelete={state.remove}
+        onSavePlace={state.savePlace}
         demo={demo}
+      />
+      <PlaceSheet
+        place={placeDraft}
+        isNew={!state.places.some((p) => p.id === placeDraft?.id)}
+        onClose={() => setPlaceDraft(null)}
+        onSave={state.savePlace}
+        onDelete={state.removePlace}
       />
     </div>
   )
@@ -165,9 +202,9 @@ function AppointmentList({ items, onOpen }: { items: Appointment[]; onOpen: (a: 
                   <span className="truncate">{a.title}</span>
                   <span className="text-muted-foreground shrink-0 font-normal tabular-nums">{when(a)}</span>
                 </ItemTitle>
-                {(a.location || a.notes) && (
+                {(a.location || a.placeName || a.notes) && (
                   <ItemDescription className="line-clamp-1">
-                    {[a.location, a.notes].filter(Boolean).join(" · ")}
+                    {[a.placeName || a.location, a.notes].filter(Boolean).join(" · ")}
                   </ItemDescription>
                 )}
               </ItemContent>
@@ -191,25 +228,33 @@ function AppointmentList({ items, onOpen }: { items: Appointment[]; onOpen: (a: 
 
 function AppointmentSheet({
   draft,
+  places,
   onClose,
   onSave,
   onDelete,
+  onSavePlace,
   demo,
 }: {
   draft: { appointment: Appointment; edit: boolean } | null
+  places: Place[]
   onClose: () => void
   onSave: (a: Appointment) => Promise<Appointment>
   onDelete: (id: string) => Promise<void>
+  onSavePlace: (p: Place) => Promise<Place>
   demo?: boolean
 }) {
   const [appt, setAppt] = useState<Appointment | null>(null)
   const [opened, setOpened] = useState<typeof draft>(null)
   const [busy, setBusy] = useState(false)
+  // The name typed for "Save as a place", or null while that row is closed.
+  const [newPlaceName, setNewPlaceName] = useState<string | null>(null)
+  const [savingPlace, setSavingPlace] = useState(false)
 
   // Fill the form while rendering, like the entry sheet, so reopening never flashes the previous one.
   if (draft && draft !== opened) {
     setOpened(draft)
     setAppt(draft.appointment)
+    setNewPlaceName(null)
   }
 
   const set = (patch: Partial<Appointment>) => setAppt((a) => (a ? { ...a, ...patch } : a))
@@ -234,6 +279,21 @@ function AppointmentSheet({
       toast.error(`Couldn't save: ${(e as Error).message}`)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function savePlace() {
+    const name = newPlaceName?.trim()
+    if (!appt?.location || !name) return
+    setSavingPlace(true)
+    try {
+      const saved = await onSavePlace({ id: newId(), name, address: appt.location })
+      set({ placeName: saved.name })
+      setNewPlaceName(null)
+    } catch (e) {
+      toast.error(`Couldn't save the place: ${(e as Error).message}`)
+    } finally {
+      setSavingPlace(false)
     }
   }
 
@@ -301,13 +361,68 @@ function AppointmentSheet({
                 </div>
                 <Field>
                   <FieldLabel htmlFor="appt-location">Where</FieldLabel>
+                  {places.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {places.map((p) => {
+                        const picked = appt.placeName === p.name && (appt.location ?? "") === p.address
+                        return (
+                          <Button
+                            key={p.id}
+                            type="button"
+                            size="sm"
+                            variant={picked ? "default" : "outline"}
+                            onClick={() =>
+                              picked
+                                ? set({ placeName: undefined, location: undefined })
+                                : set({ placeName: p.name, location: p.address || undefined })
+                            }
+                          >
+                            <MapPin /> {p.name}
+                          </Button>
+                        )
+                      })}
+                    </div>
+                  )}
                   <Input
                     id="appt-location"
                     value={appt.location ?? ""}
-                    onChange={(e) => set({ location: e.target.value || undefined })}
-                    placeholder="Optional"
+                    // A typed address no longer belongs to the saved place it came from.
+                    onChange={(e) => set({ location: e.target.value || undefined, placeName: undefined })}
+                    placeholder={places.length ? "Or type an address" : "Address, optional"}
                     maxLength={500}
                   />
+                  {appt.location && !appt.placeName && newPlaceName === null && (
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto justify-start px-0"
+                      onClick={() => setNewPlaceName("")}
+                    >
+                      <BookmarkPlus /> Save this address as a place
+                    </Button>
+                  )}
+                  {appt.location && !appt.placeName && newPlaceName !== null && (
+                    <div className="flex gap-2">
+                      <Input
+                        aria-label="Place name"
+                        value={newPlaceName}
+                        onChange={(e) => setNewPlaceName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            savePlace()
+                          }
+                        }}
+                        placeholder="Name, e.g. Pediatrician"
+                        maxLength={100}
+                        autoFocus
+                      />
+                      <Button type="button" disabled={!newPlaceName.trim() || savingPlace} onClick={savePlace}>
+                        {savingPlace && <Spinner />} Save place
+                      </Button>
+                    </div>
+                  )}
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="appt-notes">Notes</FieldLabel>
@@ -364,6 +479,104 @@ function AppointmentSheet({
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
+              )}
+            </DrawerFooter>
+          </Fragment>
+        )}
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
+function PlaceSheet({
+  place,
+  isNew,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  place: Place | null
+  isNew: boolean
+  onClose: () => void
+  onSave: (p: Place) => Promise<Place>
+  onDelete: (id: string) => Promise<void>
+}) {
+  const [form, setForm] = useState<Place | null>(null)
+  const [opened, setOpened] = useState<Place | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  if (place && place !== opened) {
+    setOpened(place)
+    setForm(place)
+  }
+
+  async function run(action: () => Promise<unknown>, failure: string) {
+    setBusy(true)
+    try {
+      await action()
+      onClose()
+    } catch (e) {
+      toast.error(`${failure}: ${(e as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Drawer open={place !== null} onOpenChange={(open) => !open && !busy && onClose()}>
+      <DrawerContent className="mx-auto max-w-lg">
+        {form && (
+          <Fragment>
+            <DrawerHeader>
+              <DrawerTitle>{isNew ? "New place" : "Edit place"}</DrawerTitle>
+              <DrawerDescription>
+                The address goes into Google Calendar, so tapping it there opens Maps.
+              </DrawerDescription>
+            </DrawerHeader>
+            <FieldGroup className="gap-5 px-4">
+              <Field>
+                <FieldLabel htmlFor="place-name">Name</FieldLabel>
+                <Input
+                  id="place-name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="Pediatrician"
+                  maxLength={100}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="place-address">Address</FieldLabel>
+                <Input
+                  id="place-address"
+                  value={form.address}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  placeholder="123 Main St, City"
+                  maxLength={500}
+                />
+                {!isNew && (
+                  <FieldDescription>Changing it doesn't change appointments already saved.</FieldDescription>
+                )}
+              </Field>
+            </FieldGroup>
+            <DrawerFooter>
+              <Button
+                size="lg"
+                disabled={busy || !form.name.trim()}
+                onClick={() =>
+                  run(() => onSave({ ...form, name: form.name.trim(), address: form.address.trim() }), "Couldn't save")
+                }
+              >
+                {busy && <Spinner />} Save
+              </Button>
+              {!isNew && (
+                <Button
+                  variant="ghost"
+                  className="text-destructive hover:text-destructive"
+                  disabled={busy}
+                  onClick={() => run(() => onDelete(form.id), "Couldn't delete")}
+                >
+                  <Trash2 /> Delete place
+                </Button>
               )}
             </DrawerFooter>
           </Fragment>
