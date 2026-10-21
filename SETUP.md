@@ -70,6 +70,18 @@ The script checks every 5 minutes and posts once for each of these:
 
 Times in the messages show in each person's own time zone. Turn individual reminders on or off with `remindFeeding`, `remindDiaper` and `remindMeds`. Set `announceEntries` to `TRUE` if you also want a message every time someone logs something.
 
+## 5. Appointments calendar
+
+Appointments added in the app's **Calendar** tab are saved in the Sheet's **Appointments** tab and copied to a Google Calendar. The copy is one way: add, edit and delete appointments in the app. Changes made in Google Calendar are not read back, and the next edit in the app overwrites them.
+
+1. Click **Baby tracker → 4. Set up appointments calendar**. Google asks for permission once more, this time to manage your calendars (the same **Advanced → Go to … → Allow** steps as before). It makes a calendar called **Carolina's appointments** and saves its ID in Settings → `calendarId`.
+2. Deploy a new version: **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The web app needs this to start using the calendar.
+3. To let others see the appointments, open [Google Calendar](https://calendar.google.com), point at **Carolina's appointments** under "My calendars", then **⋮ → Settings and sharing → Share with specific people**, and add their Google accounts.
+
+To use a calendar you already have instead, paste its ID (Google Calendar → its **Settings and sharing → Integrate calendar → Calendar ID**) into `calendarId`, then run **Baby tracker → Copy all appointments to the calendar again**. That menu item also retries any appointment the app marks with a crossed-out calendar icon.
+
+Each appointment gets an hour in the calendar when no end time is set. Google Calendar's own notifications for that calendar apply, so set them under the calendar's **Settings and sharing → Event notifications**.
+
 ## Changing things later
 
 - **Intervals and the baby's name:** edit the Settings tab. The app picks up changes the next time it's opened.
@@ -81,4 +93,5 @@ Times in the messages show in each person's own time zone. Turn individual remin
 
 - **GitHub Pages:** free for public repositories. The repo holds only code. No baby data or codes are ever stored in it.
 - **Google Apps Script (free Gmail account):** 90 minutes of trigger run time per day. The 5-minute reminder check takes about a second, which works out to roughly 5 minutes a day. App requests from the phones don't count against that limit.
+- **Google Calendar:** a free account can create about 5,000 calendar events a day, far more than appointments need.
 - **Discord webhooks:** free, with a limit of about 30 messages per minute per channel, far more than this uses.

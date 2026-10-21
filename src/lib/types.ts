@@ -33,6 +33,26 @@ export interface LogEvent {
   updatedBy?: string
 }
 
+/** A doctor's visit or similar. Copied one way to a Google Calendar by the Sheet script. */
+export interface Appointment {
+  id: string
+  title: string
+  /** ISO timestamp. */
+  start: string
+  /** ISO timestamp. Without one the calendar shows an hour. */
+  end?: string
+  location?: string
+  notes?: string
+  by: string
+  createdAt?: string
+  updatedAt?: string
+  updatedBy?: string
+  /** The calendar has the latest version. */
+  synced?: boolean
+  /** Why the calendar copy failed, if it did. The appointment itself is saved either way. */
+  syncError?: string
+}
+
 export interface Settings {
   babyName: string
   feedMinH: number

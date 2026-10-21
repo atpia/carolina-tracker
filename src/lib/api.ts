@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type LogEvent, type Session } from "./types"
+import { DEFAULT_SETTINGS, type Appointment, type LogEvent, type Session } from "./types"
 import { startOfToday } from "./time"
 
 export interface Connection {
@@ -12,6 +12,14 @@ export interface Backend {
   list(days: number): Promise<LogEvent[]>
   save(event: LogEvent): Promise<LogEvent>
   remove(id: string): Promise<void>
+  listAppointments(): Promise<Appointment[]>
+  saveAppointment(appointment: Appointment): Promise<Appointment>
+  removeAppointment(id: string): Promise<void>
+}
+
+/** A Sheet script from before appointments answers their actions with this. */
+export function isOldScriptError(e: unknown) {
+  return e instanceof Error && /^Unknown action/.test(e.message)
 }
 
 const CONN_KEY = "ct.connection"
@@ -150,9 +158,19 @@ class RemoteBackend implements Backend {
   async remove(id: string) {
     await this.call("delete", { id })
   }
+  listAppointments() {
+    return this.call<Appointment[]>("listAppointments")
+  }
+  saveAppointment(appointment: Appointment) {
+    return this.call<Appointment>("saveAppointment", { appointment })
+  }
+  async removeAppointment(id: string) {
+    await this.call("deleteAppointment", { id })
+  }
 }
 
 const DEMO_KEY = "ct.demo.events"
+const DEMO_APPTS_KEY = "ct.demo.appointments"
 
 /** A believable week of entries so the demo, and its reports, open with something to look at. */
 function sampleEvents(): LogEvent[] {
@@ -197,6 +215,20 @@ function sampleEvents(): LogEvent[] {
   return events
 }
 
+function sampleAppointments(): Appointment[] {
+  const at = (days: number, hour: number) => {
+    const d = new Date()
+    d.setDate(d.getDate() + days)
+    d.setHours(hour, 0, 0, 0)
+    return d.toISOString()
+  }
+  return [
+    { id: "a0", title: "Newborn checkup", start: at(-3, 10), end: at(-3, 11), location: "Pediatric clinic", by: "Mom", synced: true },
+    { id: "a1", title: "Two-week checkup", start: at(4, 9), end: at(4, 10), location: "Pediatric clinic", notes: "Bring the feeding log", by: "Dad", synced: true },
+    { id: "a2", title: "Lactation consultant", start: at(9, 14), by: "Mom", synced: true },
+  ]
+}
+
 class DemoBackend implements Backend {
   private read(): LogEvent[] {
     try {
@@ -233,6 +265,33 @@ class DemoBackend implements Backend {
   }
   async remove(id: string) {
     this.write(this.read().filter((e) => e.id !== id))
+  }
+  private readAppointments(): Appointment[] {
+    try {
+      const raw = localStorage.getItem(DEMO_APPTS_KEY)
+      return raw === null ? sampleAppointments() : JSON.parse(raw)
+    } catch {
+      return sampleAppointments()
+    }
+  }
+  private writeAppointments(list: Appointment[]) {
+    try {
+      localStorage.setItem(DEMO_APPTS_KEY, JSON.stringify(list))
+    } catch {
+      // ignore
+    }
+  }
+  async listAppointments() {
+    return this.readAppointments()
+  }
+  async saveAppointment(appointment: Appointment) {
+    const now = new Date().toISOString()
+    const saved = { ...appointment, updatedAt: now, createdAt: appointment.createdAt || now, synced: true }
+    this.writeAppointments([...this.readAppointments().filter((a) => a.id !== saved.id), saved])
+    return saved
+  }
+  async removeAppointment(id: string) {
+    this.writeAppointments(this.readAppointments().filter((a) => a.id !== id))
   }
 }
 

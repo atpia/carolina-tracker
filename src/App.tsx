@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import {
+  CalendarDays,
   ChartColumn,
   CloudOff,
   CloudUpload,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Appointments } from "@/components/appointments"
 import { Dashboard } from "@/components/dashboard"
 import { EntrySheet, type Draft } from "@/components/entry-sheet"
 import { ErrorBoundary } from "@/components/error-boundary"
@@ -24,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Toaster } from "@/components/ui/sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useAppointments } from "@/hooks/use-appointments"
 import { useLocalState } from "@/hooks/use-local-state"
 import { useNow } from "@/hooks/use-now"
 import { useTracker } from "@/hooks/use-tracker"
@@ -116,6 +119,7 @@ function Tracker({
   onTheme: (t: Theme) => void
 }) {
   const tracker = useTracker(conn)
+  const appointments = useAppointments(conn)
   const [unit, setUnit] = useLocalState<Unit>("ct.unit", "ml")
   const [tab, setTab] = useLocalState("ct.tab", "now")
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -235,6 +239,9 @@ function Tracker({
             </Suspense>
           </ErrorBoundary>
         </TabsContent>
+        <TabsContent value="calendar">
+          <Appointments state={appointments} user={tracker.user} demo={conn.api === "demo"} />
+        </TabsContent>
         <TabsContent value="settings">
           <SettingsView
             user={tracker.user}
@@ -256,6 +263,7 @@ function Tracker({
           <NavItem value="now" icon={<House />} label="Now" />
           <NavItem value="history" icon={<HistoryIcon />} label="History" />
           <NavItem value="reports" icon={<ChartColumn />} label="Reports" />
+          <NavItem value="calendar" icon={<CalendarDays />} label="Calendar" />
           <NavItem value="settings" icon={<SettingsIcon />} label="Settings" />
         </TabsList>
       </nav>
