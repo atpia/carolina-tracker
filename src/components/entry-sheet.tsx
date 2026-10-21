@@ -72,6 +72,8 @@ const NOTES_MAX = 1000
 
 /** One-tap feed lengths for logging a feed after it's over. */
 const DURATIONS = [10, 15, 20, 30]
+// The "Lasted" quick-duration buttons are hidden for now; flip this to bring them back.
+const SHOW_LASTED = false
 
 const CONFIDENCE_ICONS: LucideIcon[] = [Frown, Annoyed, Meh, Smile, Laugh]
 
@@ -248,7 +250,7 @@ export function EntrySheet({
                           : undefined
                       }
                     />
-                    {event.end && (
+                    {SHOW_LASTED && event.end && (
                       <Field>
                         <FieldTitle>Lasted</FieldTitle>
                         <div className="grid grid-cols-4 gap-2">
