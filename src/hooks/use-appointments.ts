@@ -43,7 +43,14 @@ export function useAppointments(conn: Connection) {
 
   const refresh = useCallback(async () => {
     try {
-      const [list, saved] = await Promise.all([backend.listAppointments(), backend.listPlaces()])
+      const [list, saved] = await Promise.all([
+        backend.listAppointments(),
+        // A script from before saved places still has appointments, so it just shows none.
+        backend.listPlaces().catch((e) => {
+          if (isOldScriptError(e)) return []
+          throw e
+        }),
+      ])
       setAppointments(list)
       writeCache(owner, list)
       setPlaces(saved)
