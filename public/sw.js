@@ -16,16 +16,25 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request
   if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return
-  // Network first so a new version shows up right away; the cached copy is only for when offline.
+  // Network first so a new version shows up right away; the cached copy is for when that fails.
   event.respondWith(
     fetch(req)
       .then((res) => {
         if (res.ok) {
           const copy = res.clone()
           caches.open(CACHE).then((cache) => cache.put(req, copy))
+          return res
         }
-        return res
+        // A file from the previous version is gone after a deploy; an older copy beats a 404.
+        return caches.match(req).then((hit) => hit || res)
       })
-      .catch(() => caches.match(req).then((hit) => hit || caches.match("./"))),
+      .catch(() =>
+        caches.match(req).then((hit) => {
+          if (hit) return hit
+          // Only a page load falls back to the app itself. Serving it in place of a script breaks the import.
+          if (req.mode === "navigate") return caches.match("./").then((page) => page || Response.error())
+          return Response.error()
+        }),
+      ),
   )
 })

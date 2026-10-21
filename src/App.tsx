@@ -12,6 +12,7 @@ import {
 
 import { Dashboard } from "@/components/dashboard"
 import { EntrySheet, type Draft } from "@/components/entry-sheet"
+import { ErrorBoundary } from "@/components/error-boundary"
 import { History } from "@/components/history"
 import { SettingsView, type Theme } from "@/components/settings-view"
 import { SetupScreen } from "@/components/setup-screen"
@@ -24,11 +25,30 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useLocalState } from "@/hooks/use-local-state"
 import { useTracker } from "@/hooks/use-tracker"
 import { loadConnection, saveConnection, type Connection } from "@/lib/api"
+import { clearAutoReload } from "@/lib/chunk"
 import { deriveStatus } from "@/lib/derive"
 import type { Unit } from "@/lib/units"
 
 // Reports pulls in the chart library, the bulk of the app's size, so it loads only when opened.
-const Reports = lazy(() => import("@/components/reports").then((m) => ({ default: m.Reports })))
+const loadReports = () =>
+  import("@/components/reports").then((m) => {
+    clearAutoReload()
+    return m
+  })
+const Reports = lazy(() => loadReports().then((m) => ({ default: m.Reports })))
+
+/** Fetch the Reports code once the app is idle, so the service worker has it cached for offline use. */
+function useWarmReports() {
+  useEffect(() => {
+    const warm = () => loadReports().catch(() => {})
+    if ("requestIdleCallback" in window) {
+      const id = requestIdleCallback(warm, { timeout: 10_000 })
+      return () => cancelIdleCallback(id)
+    }
+    const id = setTimeout(warm, 3000)
+    return () => clearTimeout(id)
+  }, [])
+}
 
 /** A setup link looks like …/#api=<script url>&code=<personal code>. */
 function connectionFromHash(): Connection | null {
@@ -96,6 +116,7 @@ function Tracker({
   const [unit, setUnit] = useLocalState<Unit>("ct.unit", "ml")
   const [tab, setTab] = useLocalState("ct.tab", "now")
   const [draft, setDraft] = useState<Draft | null>(null)
+  useWarmReports()
   const status = useMemo(() => deriveStatus(tracker.events, tracker.settings), [tracker.events, tracker.settings])
 
   if (tracker.sessionError) {
@@ -171,14 +192,19 @@ function Tracker({
           />
         </TabsContent>
         <TabsContent value="reports" className="min-w-0">
-          <Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
-            <Reports
-              events={tracker.events}
-              unit={unit}
-              babyName={tracker.settings.babyName}
-              onEnsureDays={tracker.ensureDays}
-            />
-          </Suspense>
+          <ErrorBoundary
+            title="Reports couldn't load"
+            description="This usually happens right after an update, or when the phone is offline. Reload to try again."
+          >
+            <Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
+              <Reports
+                events={tracker.events}
+                unit={unit}
+                babyName={tracker.settings.babyName}
+                onEnsureDays={tracker.ensureDays}
+              />
+            </Suspense>
+          </ErrorBoundary>
         </TabsContent>
         <TabsContent value="settings">
           <SettingsView
