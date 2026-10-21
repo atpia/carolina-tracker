@@ -3,7 +3,7 @@
 A small phone-friendly app for tracking a newborn's feedings and diapers, plus mom's alternating ibuprofen and Tylenol doses. Built with React and [shadcn/ui](https://ui.shadcn.com), hosted free on GitHub Pages, with a Google Sheet as the database.
 
 - **Feedings:** left, right or both breasts, formula, or expressed milk. Start/stop timer or times you enter by hand, a 1 to 5 confidence score for breastfeeding, and offered vs. left-over amount (or % drank) for bottles. ml or oz.
-- **Next feeding window:** 2 to 4 hours after the last feeding started.
+- **Next feeding window:** 2 to 4 hours after the last feeding ended.
 - **Diapers:** wet, stool, both, or "checked, still clean", with a countdown to the next check.
 - **Mom's medication:** shows which one is next and a countdown to when it's allowed.
 - **Shared:** each caregiver has a personal code, and every entry records who logged or last edited it.

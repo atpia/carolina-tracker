@@ -29,8 +29,10 @@ export function deriveStatus(events: LogEvent[], settings: Settings) {
   const lastIbuprofen = latest(events, (e) => e.type === "med" && e.kind === "ibuprofen")
   const lastTylenol = latest(events, (e) => e.type === "med" && e.kind === "tylenol")
 
-  const feedFrom = lastFeed ? t(lastFeed.start) + settings.feedMinH * HOUR : undefined
-  const feedBy = lastFeed ? t(lastFeed.start) + settings.feedMaxH * HOUR : undefined
+  // The countdown runs from when the last feed ended, or its start while it is still going.
+  const feedEndedAt = lastFeed ? t(lastFeed.end ?? lastFeed.start) : undefined
+  const feedFrom = feedEndedAt !== undefined ? feedEndedAt + settings.feedMinH * HOUR : undefined
+  const feedBy = feedEndedAt !== undefined ? feedEndedAt + settings.feedMaxH * HOUR : undefined
   // A change starts a longer wait; a clean check only pushes the next check out a little.
   const nextCheck = lastCheck
     ? t(lastCheck.start) + (lastCheck.kind === "dry" ? settings.diaperAfterCleanH : settings.diaperAfterChangeH) * HOUR
@@ -47,6 +49,7 @@ export function deriveStatus(events: LogEvent[], settings: Settings) {
   return {
     activeFeed,
     lastFeed,
+    feedEndedAt,
     feedFrom,
     feedBy,
     lastChange,

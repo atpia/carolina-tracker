@@ -14,8 +14,8 @@ var EVENT_HEADERS = [
 var USER_HEADERS = ['name', 'code', 'active', 'setupLink'];
 var DEFAULT_SETTINGS = [
   ['babyName', 'Carolina', 'Shown at the top of the app'],
-  ['feedMinH', 2, 'Hours after a feeding starts when the next window opens'],
-  ['feedMaxH', 4, 'Hours after a feeding starts when the next one is due'],
+  ['feedMinH', 2, 'Hours after a feeding ends when the next window opens'],
+  ['feedMaxH', 4, 'Hours after a feeding ends when the next one is due'],
   ['medIntervalH', 4, "Hours between mom's doses (alternating ibuprofen and Tylenol)"],
   ['diaperAfterChangeH', 2, 'Hours until the next diaper check after a wet or stool diaper'],
   ['diaperAfterCleanH', 1, 'Hours until the next check after one that found the diaper clean'],
@@ -405,12 +405,14 @@ function checkReminders() {
   if (truthy_(s.remindFeeding)) {
     var feed = latest_(events, function (e) { return e.type === 'feeding'; });
     if (feed) {
-      var started = new Date(feed.start).getTime();
-      var by = started + Number(s.feedMaxH) * H;
-      once('feedopen:' + feed.id, started + Number(s.feedMinH) * H,
-        '🍼 Feeding window is open. Last feed (' + label_(feed) + ') started ' + ts_(started) + ', next one due by ' + ts_(by) + '.');
-      once('feeddue:' + feed.id, by,
-        '⏰ Feeding is due now. It has been ' + s.feedMaxH + ' hours since the last one started at ' + ts_(started) + '.');
+      // Count from when the feed ended, or its start while it is still going.
+      var ended = new Date(feed.end || feed.start).getTime();
+      var by = ended + Number(s.feedMaxH) * H;
+      var key = feed.id + ':' + ended;
+      once('feedopen:' + key, ended + Number(s.feedMinH) * H,
+        '🍼 Feeding window is open. Last feed (' + label_(feed) + ') ended ' + ts_(ended) + ', next one due by ' + ts_(by) + '.');
+      once('feeddue:' + key, by,
+        '⏰ Feeding is due now. It has been ' + s.feedMaxH + ' hours since the last one ended at ' + ts_(ended) + '.');
     }
   }
 

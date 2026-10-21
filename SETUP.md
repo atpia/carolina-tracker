@@ -60,7 +60,7 @@ To remove someone's access, set their `active` cell to `FALSE` in the Users tab.
 4. Click **Baby tracker → 3. Turn on Discord reminders**. Google may ask for permission once more.
 
 The script checks every 5 minutes and posts once for each of these:
-- 🍼 the feeding window opens (2 hours after the last feeding started), and ⏰ again if no one has fed her by 4 hours
+- 🍼 the feeding window opens (2 hours after the last feeding ended), and ⏰ again if no one has fed her by 4 hours
 - 🧷 a diaper check is due: 2 hours after a wet or stool diaper, or 1 hour after a check that found it clean
 - 💊 mom's next dose is allowed, naming which medication is next
 

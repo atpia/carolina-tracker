@@ -113,15 +113,14 @@ function FeedingCard({
   unit: Unit
   onOpen: (draft: Draft) => void
 }) {
-  const { lastFeed, feedFrom, feedBy } = status
+  const { lastFeed, feedEndedAt, feedFrom, feedBy } = status
   let headline = "No feedings logged yet"
   let sub = ""
   let tone = "text-foreground"
   let progress = 0
 
-  if (lastFeed && feedFrom && feedBy) {
-    const startedAt = t(lastFeed.start)
-    progress = Math.min(100, ((now - startedAt) / (feedBy - startedAt)) * 100)
+  if (lastFeed && feedEndedAt !== undefined && feedFrom && feedBy) {
+    progress = Math.min(100, Math.max(0, ((now - feedEndedAt) / (feedBy - feedEndedAt)) * 100))
     if (now < feedFrom) {
       headline = `Next feed ${relative(feedFrom, now)}`
       sub = `Window ${formatClock(feedFrom)} to ${formatClock(feedBy)}`
