@@ -16,6 +16,8 @@ export interface LogEvent {
   percent?: number
   /** 1 to 5, how confident we are she ate well (breast feeds). */
   confidence?: number
+  /** Mom's medication only: the dose in mg, if someone entered it. */
+  doseMg?: number
   notes?: string
   by: string
   createdAt?: string
@@ -32,6 +34,9 @@ export interface Settings {
   diaperAfterChangeH: number
   /** Hours until the next check after a check that found it clean. */
   diaperAfterCleanH: number
+  /** Daily goals shown on the Today card. */
+  targetFeedsPerDay: number
+  targetWetPerDay: number
 }
 
 export interface Session {
@@ -47,6 +52,8 @@ export const DEFAULT_SETTINGS: Settings = {
   medIntervalH: 4,
   diaperAfterChangeH: 2,
   diaperAfterCleanH: 1,
+  targetFeedsPerDay: 8,
+  targetWetPerDay: 6,
 }
 
 export const FEED_LABELS: Record<FeedKind, string> = {

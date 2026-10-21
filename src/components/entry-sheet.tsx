@@ -32,6 +32,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { consumedMl } from "@/lib/derive"
 import { newId } from "@/lib/api"
+import { entryErrors, type BottleMode } from "@/lib/validate"
 import {
   DIAPER_LABELS,
   isBottle,
@@ -66,7 +67,8 @@ const TITLES: Record<EventType, string> = {
   med: "mom's medication",
 }
 
-type BottleMode = "left" | "percent" | "amount"
+/** One-tap feed lengths for logging a feed after it's over. */
+const DURATIONS = [10, 15, 20, 30]
 
 const CONFIDENCE_ICONS: LucideIcon[] = [Frown, Annoyed, Meh, Smile, Laugh]
 
@@ -74,26 +76,6 @@ function parseNum(value: string) {
   if (value.trim() === "") return undefined
   const n = Number(value)
   return Number.isFinite(n) ? n : undefined
-}
-
-/** Problems that would save a wrong entry. Each one blocks saving. */
-function entryErrors(e: LogEvent, mode: BottleMode): string[] {
-  const out: string[] = []
-  // A few minutes of slack so a clock that's slightly off between phones doesn't block a save.
-  const soon = Date.now() + 5 * 60_000
-  const start = new Date(e.start).getTime()
-  const end = e.type === "feeding" && e.end ? new Date(e.end).getTime() : undefined
-  if (start > soon || (end !== undefined && end > soon)) out.push("Times can't be in the future.")
-  if (end !== undefined && end < start) out.push("The finish time is before the start time.")
-  if (e.type === "feeding" && isBottle(e.kind)) {
-    const offered = e.amountStartMl
-    const left = mode === "left" ? e.amountEndMl : undefined
-    if ((offered ?? 0) < 0 || (left ?? 0) < 0) out.push("Amounts can't be negative.")
-    else if (offered !== undefined && left !== undefined && left > offered)
-      out.push("More is left over than was offered.")
-    if (offered === undefined && left !== undefined) out.push("Add how much was offered.")
-  }
-  return out
 }
 
 function KindOption({
@@ -149,6 +131,7 @@ export function EntrySheet({
     if (!event) return
     const out: LogEvent = { ...event, ...override }
     if (out.type !== "feeding") delete out.end
+    if (out.type !== "med") delete out.doseMg
     if (out.type === "feeding" && isBottle(out.kind)) {
       delete out.confidence
       if (bottleMode === "percent") delete out.amountEndMl
@@ -253,6 +236,29 @@ export function EntrySheet({
                           : undefined
                       }
                     />
+                    {event.end && (
+                      <Field>
+                        <FieldTitle>Lasted</FieldTitle>
+                        <div className="grid grid-cols-4 gap-2">
+                          {DURATIONS.map((mins) => {
+                            const end = new Date(event.end!).getTime()
+                            const current = end - new Date(event.start).getTime() === mins * 60_000
+                            return (
+                              <Button
+                                key={mins}
+                                type="button"
+                                size="sm"
+                                variant={current ? "default" : "outline"}
+                                onClick={() => set({ start: new Date(end - mins * 60_000).toISOString() })}
+                              >
+                                {mins} min
+                              </Button>
+                            )
+                          })}
+                        </div>
+                        <FieldDescription>Sets the start time this long before the finish.</FieldDescription>
+                      </Field>
+                    )}
 
                     {bottle ? (
                       <Field>
@@ -438,6 +444,17 @@ export function EntrySheet({
                       value={event.start}
                       onChange={(v) => v && set({ start: v })}
                     />
+                    <Field>
+                      <FieldLabel htmlFor="dose">Dose (mg)</FieldLabel>
+                      <Input
+                        id="dose"
+                        inputMode="decimal"
+                        value={event.doseMg ?? ""}
+                        onChange={(e) => set({ doseMg: parseNum(e.target.value) })}
+                        placeholder="Optional, e.g. 400"
+                      />
+                      <FieldDescription>Quick doses on the home screen reuse the last amount entered.</FieldDescription>
+                    </Field>
                   </>
                 )}
 

@@ -9,7 +9,7 @@
 
 var EVENT_HEADERS = [
   'id', 'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent',
-  'confidence', 'notes', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'deleted',
+  'confidence', 'notes', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'deleted', 'doseMg',
 ];
 var USER_HEADERS = ['name', 'code', 'active', 'setupLink'];
 var DEFAULT_SETTINGS = [
@@ -19,6 +19,8 @@ var DEFAULT_SETTINGS = [
   ['medIntervalH', 4, "Hours between mom's doses (alternating ibuprofen and Tylenol)"],
   ['diaperAfterChangeH', 2, 'Hours until the next diaper check after a wet or stool diaper'],
   ['diaperAfterCleanH', 1, 'Hours until the next check after one that found the diaper clean'],
+  ['targetFeedsPerDay', 8, 'Daily feeding goal shown on the Today card'],
+  ['targetWetPerDay', 6, 'Daily wet diaper goal shown on the Today card'],
   ['appUrl', 'https://atpia.github.io/carolina-tracker/', 'Where the app is hosted, used for setup links'],
   ['apiUrl', '', 'Web app URL from Deploy → Manage deployments (ends in /exec), used for setup links'],
   ['discordWebhook', '', 'Discord channel webhook URL for reminders (leave blank for none)'],
@@ -28,8 +30,10 @@ var DEFAULT_SETTINGS = [
   ['announceEntries', false, 'Also post every new entry to Discord'],
 ];
 var DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
-var NUMBER_FIELDS = { amountStartMl: true, amountEndMl: true, percent: true, confidence: true };
-var EDITABLE_FIELDS = ['type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent', 'confidence', 'notes'];
+var NUMBER_FIELDS = { amountStartMl: true, amountEndMl: true, percent: true, confidence: true, doseMg: true };
+var EDITABLE_FIELDS = [
+  'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent', 'confidence', 'doseMg', 'notes',
+];
 var TYPES = { feeding: true, diaper: true, med: true };
 
 // ---------------------------------------------------------------------------
@@ -46,6 +50,8 @@ function setup() {
   }
 
   var events = ensureSheet_(ss, 'Events', EVENT_HEADERS);
+  // Columns added in later versions of this script go on the end of an existing header row.
+  events.getRange(1, 1, 1, EVENT_HEADERS.length).setValues([EVENT_HEADERS]).setFontWeight('bold');
   events.setFrozenRows(1);
   events.getRange('D:E').setNumberFormat('yyyy-mm-dd h:mm am/pm');
   events.getRange('L:M').setNumberFormat('yyyy-mm-dd h:mm am/pm');
@@ -207,6 +213,8 @@ function clientSettings_() {
     medIntervalH: Number(s.medIntervalH),
     diaperAfterChangeH: Number(s.diaperAfterChangeH),
     diaperAfterCleanH: Number(s.diaperAfterCleanH),
+    targetFeedsPerDay: Number(s.targetFeedsPerDay),
+    targetWetPerDay: Number(s.targetWetPerDay),
   };
 }
 
@@ -247,23 +255,47 @@ function eventToRow_(e) {
     var v = e[h];
     if (v === undefined || v === null) return '';
     if (DATE_FIELDS[h]) return v ? new Date(v) : '';
+    // A leading apostrophe stops the Sheet reading text like "=2 oz" as a formula. It isn't part of the value.
+    if (typeof v === 'string' && /^[=+\-@]/.test(v)) return "'" + v;
     return v;
   });
 }
 
-function allEvents_() {
-  var sheet = eventsSheet_();
-  if (sheet.getLastRow() < 2) return [];
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, EVENT_HEADERS.length).getValues()
-    .map(rowToEvent_)
-    .filter(function (e) { return e.id && e.deleted !== true && String(e.deleted).toUpperCase() !== 'TRUE'; });
-}
+var SCAN_CHUNK = 500;
 
+/**
+ * Entries that started in the last `days` days. Rows are appended as they're created, and an entry can't
+ * start after it was created or last edited, so this reads up from the bottom in chunks and stops at a
+ * chunk where nothing was created or edited since then. That keeps each poll fast as the Sheet grows.
+ */
 function listEvents_(days) {
   var since = Date.now() - days * 86400000;
-  return allEvents_()
-    .filter(function (e) { return new Date(e.start).getTime() >= since; })
-    .map(function (e) { delete e.deleted; return e; });
+  var sheet = eventsSheet_();
+  var last = sheet.getLastRow();
+  var created = EVENT_HEADERS.indexOf('createdAt');
+  var updated = EVENT_HEADERS.indexOf('updatedAt');
+  var out = [];
+  for (var end = last; end >= 2; end -= SCAN_CHUNK) {
+    var start = Math.max(2, end - SCAN_CHUNK + 1);
+    var rows = sheet.getRange(start, 1, end - start + 1, EVENT_HEADERS.length).getValues();
+    var recent = false;
+    rows.forEach(function (row) {
+      var touched = Math.max(time_(row[created]), time_(row[updated]));
+      if (touched >= since || !touched) recent = true;
+      var e = rowToEvent_(row);
+      if (!e.id || truthy_(e.deleted) || new Date(e.start).getTime() < since) return;
+      delete e.deleted;
+      out.push(e);
+    });
+    if (!recent) break;
+  }
+  return out;
+}
+
+function time_(v) {
+  if (v === '' || v === null) return 0;
+  var t = (v instanceof Date ? v : new Date(v)).getTime();
+  return isNaN(t) ? 0 : t;
 }
 
 function findRow_(id) {
@@ -289,6 +321,8 @@ function saveEvent_(input, user) {
   var event;
   if (row) {
     event = rowToEvent_(sheet.getRange(row, 1, 1, EVENT_HEADERS.length).getValues()[0]);
+    // Editing an entry someone else deleted would save into a hidden row and look like it worked.
+    if (truthy_(event.deleted)) throw new Error('This entry was deleted on another phone.');
     EDITABLE_FIELDS.forEach(function (f) { event[f] = input[f]; });
     event.updatedAt = now;
     event.updatedBy = user;

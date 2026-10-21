@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
+import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import {
   ChartColumn,
   CloudOff,
+  CloudUpload,
   History as HistoryIcon,
   House,
   RefreshCw,
@@ -12,7 +13,6 @@ import {
 import { Dashboard } from "@/components/dashboard"
 import { EntrySheet, type Draft } from "@/components/entry-sheet"
 import { History } from "@/components/history"
-import { Reports } from "@/components/reports"
 import { SettingsView, type Theme } from "@/components/settings-view"
 import { SetupScreen } from "@/components/setup-screen"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -26,6 +26,9 @@ import { useTracker } from "@/hooks/use-tracker"
 import { loadConnection, saveConnection, type Connection } from "@/lib/api"
 import { deriveStatus } from "@/lib/derive"
 import type { Unit } from "@/lib/units"
+
+// Reports pulls in the chart library, the bulk of the app's size, so it loads only when opened.
+const Reports = lazy(() => import("@/components/reports").then((m) => ({ default: m.Reports })))
 
 /** A setup link looks like …/#api=<script url>&code=<personal code>. */
 function connectionFromHash(): Connection | null {
@@ -119,6 +122,11 @@ function Tracker({
         <h1 className="text-xl font-semibold">{tracker.settings.babyName}</h1>
         <div className="text-muted-foreground flex items-center gap-2 text-xs">
           {tracker.loading && <Spinner className="size-3.5" />}
+          {tracker.queued > 0 && (
+            <span className="flex items-center gap-1" title="Saved on this phone, waiting for a connection">
+              <CloudUpload className="size-3.5" /> {tracker.queued} to sync
+            </span>
+          )}
           {tracker.error && !tracker.loading && (
             <button className="text-destructive flex items-center gap-1" onClick={tracker.refresh}>
               <CloudOff className="size-3.5" /> Offline, tap to retry
@@ -144,6 +152,7 @@ function Tracker({
             <Dashboard
               status={status}
               user={tracker.user}
+              babyName={tracker.settings.babyName}
               unit={unit}
               onOpen={setDraft}
               onSave={tracker.save}
@@ -156,17 +165,20 @@ function Tracker({
             events={tracker.events}
             unit={unit}
             days={tracker.days}
+            loadedDays={tracker.loadedDays}
             onOpen={setDraft}
             onLoadMore={tracker.loadMore}
           />
         </TabsContent>
         <TabsContent value="reports" className="min-w-0">
-          <Reports
-            events={tracker.events}
-            unit={unit}
-            babyName={tracker.settings.babyName}
-            onEnsureDays={tracker.ensureDays}
-          />
+          <Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
+            <Reports
+              events={tracker.events}
+              unit={unit}
+              babyName={tracker.settings.babyName}
+              onEnsureDays={tracker.ensureDays}
+            />
+          </Suspense>
         </TabsContent>
         <TabsContent value="settings">
           <SettingsView

@@ -1,9 +1,20 @@
+import { useState } from "react"
 import { CircleStop, Pencil, Plus } from "lucide-react"
 import { toast } from "sonner"
 
 import type { Draft } from "@/components/entry-sheet"
 import { eventDetails, eventTitle } from "@/components/describe"
 import { kindIcon, TYPE_ICONS } from "@/components/icons"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -21,6 +32,7 @@ const t = (iso: string) => new Date(iso).getTime()
 export function Dashboard({
   status,
   user,
+  babyName,
   unit,
   onOpen,
   onSave,
@@ -28,6 +40,7 @@ export function Dashboard({
 }: {
   status: Status
   user: string
+  babyName: string
   unit: Unit
   onOpen: (draft: Draft) => void
   onSave: (event: LogEvent) => Promise<void>
@@ -35,7 +48,7 @@ export function Dashboard({
 }) {
   const now = useNow(1000)
 
-  async function quickLog(partial: Pick<LogEvent, "type" | "kind">, message: string) {
+  async function quickLog(partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) {
     const event: LogEvent = { id: newId(), start: new Date().toISOString(), by: user, ...partial }
     try {
       await onSave(event)
@@ -49,14 +62,15 @@ export function Dashboard({
 
   return (
     <div className="grid gap-4">
-      {status.activeFeed &&
-        (status.activeFeedStale ? (
-          <ForgottenFeed event={status.activeFeed} now={now} onOpen={onOpen} />
+      {status.activeFeeds.map(({ event, stale }) =>
+        stale ? (
+          <ForgottenFeed key={event.id} event={event} now={now} onOpen={onOpen} />
         ) : (
-          <ActiveFeed event={status.activeFeed} now={now} onOpen={onOpen} onSave={onSave} />
-        ))}
+          <ActiveFeed key={event.id} event={event} now={now} onOpen={onOpen} onSave={onSave} />
+        ),
+      )}
       <FeedingCard status={status} now={now} unit={unit} onOpen={onOpen} />
-      <DiaperCard status={status} now={now} onOpen={onOpen} quickLog={quickLog} />
+      <DiaperCard status={status} babyName={babyName} now={now} onOpen={onOpen} quickLog={quickLog} />
       <MedCard status={status} now={now} onOpen={onOpen} quickLog={quickLog} />
       <TodayCard status={status} unit={unit} />
     </div>
@@ -140,13 +154,18 @@ function FeedingCard({
   unit: Unit
   onOpen: (draft: Draft) => void
 }) {
-  const { lastFeed, feedEndedAt, feedFrom, feedBy } = status
+  const { lastFeed, lastSide, feedRunning, feedEndedAt, feedFrom, feedBy } = status
   let headline = "No feedings logged yet"
   let sub = ""
   let tone = "text-foreground"
   let progress = 0
+  const suggested = nextSide(lastSide)
 
-  if (lastFeed && feedEndedAt !== undefined && feedFrom && feedBy) {
+  if (feedRunning) {
+    headline = "Feeding now"
+    sub = "The next window starts counting when this feed ends."
+    tone = "text-feed"
+  } else if (lastFeed && feedEndedAt !== undefined && feedFrom && feedBy) {
     progress = Math.min(100, Math.max(0, ((now - feedEndedAt) / (feedBy - feedEndedAt)) * 100))
     if (now < feedFrom) {
       headline = `Next feed ${relative(feedFrom, now)}`
@@ -174,7 +193,9 @@ function FeedingCard({
       <CardContent className="grid gap-4">
         {lastFeed && (
           <>
-            <Progress value={progress} indicatorClassName={cn(progress >= 100 ? "bg-destructive" : "bg-feed")} />
+            {!feedRunning && (
+              <Progress value={progress} indicatorClassName={cn(progress >= 100 ? "bg-destructive" : "bg-feed")} />
+            )}
             <button
               className="hover:bg-muted -mx-2 rounded-md px-2 py-1 text-left text-sm"
               onClick={() => onOpen({ ...lastFeed, edit: true })}
@@ -193,15 +214,15 @@ function FeedingCard({
           onClick={() =>
             onOpen({
               type: "feeding",
-              kind: lastFeed && isBottle(lastFeed.kind) ? lastFeed.kind : lastSideSuggestion(lastFeed),
+              kind: lastFeed && isBottle(lastFeed.kind) ? lastFeed.kind : suggested,
             })
           }
         >
           <Plus /> Add feed
         </Button>
-        {lastFeed && !isBottle(lastFeed.kind) && lastFeed.kind !== "both" && (
+        {lastSide && !(lastFeed && isBottle(lastFeed.kind)) && (
           <p className="text-muted-foreground -mt-2 text-xs">
-            Last side was {lastFeed.kind}, so the form starts on the {lastSideSuggestion(lastFeed)}.
+            Last single side was {lastSide.kind}, so the form starts on the {suggested}.
           </p>
         )}
       </CardContent>
@@ -209,11 +230,9 @@ function FeedingCard({
   )
 }
 
-/** Breastfeeding usually alternates sides, so suggest the opposite of the last one. */
-function lastSideSuggestion(last?: LogEvent) {
-  if (last?.kind === "left") return "right"
-  if (last?.kind === "right") return "left"
-  return "left"
+/** Breastfeeding usually alternates sides, so suggest the opposite of the last single-side feed. */
+function nextSide(lastSide?: LogEvent) {
+  return lastSide?.kind === "left" ? "right" : "left"
 }
 
 const DIAPER_BUTTONS: { kind: DiaperKind; label: string; toast: string }[] = [
@@ -225,11 +244,13 @@ const DIAPER_BUTTONS: { kind: DiaperKind; label: string; toast: string }[] = [
 
 function DiaperCard({
   status,
+  babyName,
   now,
   onOpen,
   quickLog,
 }: {
   status: Status
+  babyName: string
   now: number
   onOpen: (draft: Draft) => void
   quickLog: (partial: Pick<LogEvent, "type" | "kind">, message: string) => void
@@ -239,7 +260,7 @@ function DiaperCard({
   const headline = !nextCheck
     ? "No diaper checks yet"
     : due
-      ? "Time to check her diaper"
+      ? `Time to check ${babyName}'s diaper`
       : `Next check ${relative(nextCheck, now)}`
 
   const log = (kind: DiaperKind, label: string) => quickLog({ type: "diaper", kind }, label)
@@ -316,14 +337,35 @@ function MedCard({
   status: Status
   now: number
   onOpen: (draft: Draft) => void
-  quickLog: (partial: Pick<LogEvent, "type" | "kind">, message: string) => void
+  quickLog: (partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) => void
 }) {
-  const { nextMedKind, nextMedAt, lastIbuprofen, lastTylenol } = status
+  const { nextMedKind, nextMedAt, lastMed, meds } = status
+  const [confirm, setConfirm] = useState<{ kind: MedKind; reason: string } | null>(null)
   const other: MedKind = nextMedKind === "ibuprofen" ? "tylenol" : "ibuprofen"
   const ready = nextMedAt === undefined || now >= nextMedAt
   const remaining = nextMedAt ? nextMedAt - now : 0
   const NextIcon = kindIcon("med", nextMedKind)
   const OtherIcon = kindIcon("med", other)
+
+  // Quick doses reuse the last mg entered for that medicine, so totals stay filled in.
+  const log = (kind: MedKind) =>
+    quickLog({ type: "med", kind, doseMg: meds[kind].last?.doseMg }, `${MED_LABELS[kind]} logged`)
+
+  /** Why taking this medicine now would be ahead of the schedule, if it would be. */
+  function tooSoon(kind: MedKind) {
+    const same = meds[kind]
+    if (same.last && same.nextAt !== undefined && now < same.nextAt)
+      return `${MED_LABELS[kind]} was last taken ${relative(t(same.last.start), now)}. On this schedule it comes around again at ${formatClock(same.nextAt)}.`
+    if (lastMed && nextMedAt !== undefined && now < nextMedAt)
+      return `The last dose was ${relative(t(lastMed.start), now)}. The next one is due at ${formatClock(nextMedAt)}.`
+    return undefined
+  }
+
+  function take(kind: MedKind) {
+    const reason = tooSoon(kind)
+    if (reason) setConfirm({ kind, reason })
+    else log(kind)
+  }
 
   return (
     <Card>
@@ -346,7 +388,7 @@ function MedCard({
             size="icon"
             variant="ghost"
             aria-label="Log a dose at another time"
-            onClick={() => onOpen({ type: "med", kind: nextMedKind })}
+            onClick={() => onOpen({ type: "med", kind: nextMedKind, doseMg: meds[nextMedKind].last?.doseMg })}
           >
             <Plus />
           </Button>
@@ -355,40 +397,46 @@ function MedCard({
       <CardContent className="grid gap-3">
         {!ready && <div className="text-med text-4xl font-semibold tabular-nums">{formatTimer(remaining)}</div>}
         <div className="text-muted-foreground grid grid-cols-2 gap-2 text-sm">
-          <MedLast label="Ibuprofen" event={lastIbuprofen} now={now} onOpen={onOpen} />
-          <MedLast label="Tylenol" event={lastTylenol} now={now} onOpen={onOpen} />
+          {(["ibuprofen", "tylenol"] as MedKind[]).map((kind) => (
+            <MedLast key={kind} label={MED_LABELS[kind]} info={meds[kind]} now={now} onOpen={onOpen} />
+          ))}
         </div>
-        <Button
-          size="lg"
-          variant={ready ? "default" : "secondary"}
-          onClick={() => quickLog({ type: "med", kind: nextMedKind }, `${MED_LABELS[nextMedKind]} logged`)}
-        >
+        <Button size="lg" variant={ready ? "default" : "secondary"} onClick={() => take(nextMedKind)}>
           <NextIcon /> Took {MED_LABELS[nextMedKind]} now
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground"
-          onClick={() => quickLog({ type: "med", kind: other }, `${MED_LABELS[other]} logged`)}
-        >
+        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => take(other)}>
           <OtherIcon /> Took {MED_LABELS[other]} instead
         </Button>
       </CardContent>
+      <AlertDialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This is earlier than the schedule</AlertDialogTitle>
+            <AlertDialogDescription>{confirm?.reason} Log it anyway?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Don't log</AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirm && log(confirm.kind)}>Log it anyway</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }
 
 function MedLast({
   label,
-  event,
+  info,
   now,
   onOpen,
 }: {
   label: string
-  event?: LogEvent
+  info: Status["meds"][MedKind]
   now: number
   onOpen: (draft: Draft) => void
 }) {
+  const event = info.last
+  const day = info.doses24h ? `${info.doses24h} in 24h${info.mg24h ? ` · ${info.mg24h.toLocaleString()} mg` : ""}` : ""
   return (
     <button
       className="bg-muted/60 hover:bg-muted rounded-md px-3 py-2 text-left disabled:pointer-events-none"
@@ -397,16 +445,18 @@ function MedLast({
     >
       <div className="text-foreground font-medium">{label}</div>
       {event ? `${formatClock(event.start)} · ${relative(t(event.start), now)}` : "Not yet"}
+      {day && <div className="text-xs">{day}</div>}
     </button>
   )
 }
 
 function TodayCard({ status, unit }: { status: Status; unit: Unit }) {
   const { feeds, bottleMl, wet, stool } = status.today
+  const { targets } = status
   const stats = [
-    { label: "Feeds", value: feeds },
+    { label: "Feeds", value: feeds, goal: targets.feeds },
     { label: "Bottle", value: bottleMl ? formatAmount(bottleMl, unit) : "0" },
-    { label: "Wet", value: wet },
+    { label: "Wet", value: wet, goal: targets.wet },
     { label: "Stool", value: stool },
   ]
   return (
@@ -417,7 +467,10 @@ function TodayCard({ status, unit }: { status: Status; unit: Unit }) {
       <CardContent className="grid grid-cols-4 gap-2 text-center">
         {stats.map((s) => (
           <div key={s.label}>
-            <div className="text-xl font-semibold tabular-nums">{s.value}</div>
+            <div className="text-xl font-semibold tabular-nums">
+              {s.value}
+              {s.goal ? <span className="text-muted-foreground text-sm font-normal">/{s.goal}</span> : null}
+            </div>
             <div className="text-muted-foreground text-xs">{s.label}</div>
           </div>
         ))}
