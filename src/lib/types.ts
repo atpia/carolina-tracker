@@ -77,6 +77,8 @@ export interface Settings {
   targetWetPerDay: number
   /** Minutes per breast before a running timer flashes. 0 turns the warning off. */
   breastLimitMin: number
+  /** The Sheet has a Home Assistant webhook to flash a light when a breastfeed passes the limit. */
+  lightAlert: boolean
 }
 
 export interface Session {
@@ -95,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   targetFeedsPerDay: 0,
   targetWetPerDay: 0,
   breastLimitMin: 15,
+  lightAlert: false,
 }
 
 export const FEED_LABELS: Record<FeedKind, string> = {

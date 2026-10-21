@@ -12,6 +12,8 @@ export interface Backend {
   list(days: number): Promise<LogEvent[]>
   save(event: LogEvent): Promise<LogEvent>
   remove(id: string): Promise<void>
+  /** Ask the Sheet to flash the Home Assistant light for a feed past the limit. True if it did. */
+  lightAlert(id: string): Promise<boolean>
   listAppointments(): Promise<Appointment[]>
   saveAppointment(appointment: Appointment): Promise<Appointment>
   removeAppointment(id: string): Promise<void>
@@ -161,6 +163,9 @@ class RemoteBackend implements Backend {
   async remove(id: string) {
     await this.call("delete", { id })
   }
+  lightAlert(id: string) {
+    return this.call<boolean>("lightAlert", { id })
+  }
   listAppointments() {
     return this.call<Appointment[]>("listAppointments")
   }
@@ -279,6 +284,9 @@ class DemoBackend implements Backend {
   }
   async remove(id: string) {
     this.write(this.read().filter((e) => e.id !== id))
+  }
+  async lightAlert() {
+    return false
   }
   private readAppointments(): Appointment[] {
     try {
