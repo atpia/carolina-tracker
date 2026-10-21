@@ -148,7 +148,7 @@ export function analyze(events: LogEvent[], range: Range) {
       wetPerDay: wet.length / days,
       stool: stool.length,
       stoolPerDay: stool.length / days,
-      clean: diapers.filter((e) => e.kind === "dry").length,
+      longestWithoutStool: longestGap(stool.map((e) => t(e.start))),
       longestWithoutWet: longestGap(wet.map((e) => t(e.start))),
     },
   }

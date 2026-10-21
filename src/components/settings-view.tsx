@@ -117,7 +117,9 @@ export function SettingsView({
           <Separator />
           <Row label="Medication every" value={`${settings.medIntervalH} hours, alternating`} />
           <Separator />
-          <Row label="Diaper check every" value={`${settings.diaperCheckH} hours`} />
+          <Row label="Diaper check after a change" value={`${settings.diaperAfterChangeH} hours`} />
+          <Separator />
+          <Row label="Recheck after a clean diaper" value={`${settings.diaperAfterCleanH} hours`} />
         </CardContent>
       </Card>
 

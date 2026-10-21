@@ -1,39 +1,57 @@
 import {
-  ArrowLeftRight,
   Baby,
-  Droplet,
+  Bomb,
+  CircleDot,
   Droplets,
   GlassWater,
-  Layers,
   Milk,
   Pill,
   PillBottle,
   Sparkles,
   Tablets,
-  Toilet,
+  WavesHorizontal,
   type LucideIcon,
+  type LucideProps,
 } from "lucide-react"
 
 import type { EventType } from "@/lib/types"
+import { cn } from "@/lib/utils"
+
+/** Two icons side by side, for "both" kinds (both breasts, wet + stool). */
+function pair(First: LucideIcon, Second: LucideIcon): LucideIcon {
+  const Pair = ({ className, ...props }: LucideProps) => (
+    <span data-icon-pair className="inline-flex shrink-0 items-center -space-x-0.5">
+      <First className={cn("size-4", className)} {...props} />
+      <Second className={cn("size-4", className)} {...props} />
+    </span>
+  )
+  return Pair as unknown as LucideIcon
+}
+
+const BothBreasts = pair(CircleDot, CircleDot)
+const WetAndStool = pair(WavesHorizontal, Bomb)
 
 /** One lucide icon per kind of entry, used everywhere an entry is shown. */
 export const KIND_ICONS: Record<string, LucideIcon> = {
-  left: Baby,
-  right: Baby,
-  both: ArrowLeftRight,
+  left: CircleDot,
+  right: CircleDot,
   formula: Milk,
   expressed: GlassWater,
-  wet: Droplet,
-  stool: Toilet,
+  wet: WavesHorizontal,
+  stool: Bomb,
   dry: Sparkles,
   ibuprofen: Pill,
   tylenol: Tablets,
 }
 
-/** The diaper "both" kind shares its key with breastfeeding "both". */
+/** "both" means two breasts for a feeding and wet + stool for a diaper. */
 export function kindIcon(type: EventType, kind: string): LucideIcon {
-  if (type === "diaper" && kind === "both") return Layers
+  if (kind === "both") return type === "diaper" ? WetAndStool : BothBreasts
   return KIND_ICONS[kind] ?? (type === "feeding" ? Baby : type === "diaper" ? Droplets : Pill)
+}
+
+export function isPairKind(kind: string) {
+  return kind === "both"
 }
 
 export const TYPE_ICONS: Record<EventType, LucideIcon> = {

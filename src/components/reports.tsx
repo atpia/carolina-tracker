@@ -7,7 +7,7 @@ import { toast } from "sonner"
 
 import { eventDetails, eventTitle } from "@/components/describe"
 import { EventIcon } from "@/components/event-icon"
-import { TYPE_ICONS } from "@/components/icons"
+import { isPairKind, TYPE_ICONS } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -82,6 +82,7 @@ function summaryText(name: string, range: Range, a: Analysis, unit: Unit) {
     `Wet diapers: ${d.wet} (${per(d.wetPerDay, a.days)})`,
     `Stools: ${d.stool} (${per(d.stoolPerDay, a.days)})`,
     d.longestWithoutWet.ms ? `Longest without a wet diaper: ${formatDuration(d.longestWithoutWet.ms)}` : "",
+    d.longestWithoutStool.ms ? `Longest without a stool: ${formatDuration(d.longestWithoutStool.ms)}` : "",
   ]
   return lines.filter((l, i) => l !== "" || lines[i - 1] !== "").join("\n")
 }
@@ -274,7 +275,15 @@ export function Reports({
                   : "needs 2+ wet diapers"
               }
             />
-            <Stat label="Clean checks" value={String(a.diaper.clean)} sub="checked, nothing in it" />
+            <Stat
+              label="Longest without stool"
+              value={a.diaper.longestWithoutStool.ms ? formatDuration(a.diaper.longestWithoutStool.ms) : "–"}
+              sub={
+                a.diaper.longestWithoutStool.at
+                  ? `from ${format(new Date(a.diaper.longestWithoutStool.at), "MMM d, h:mm a")}`
+                  : "needs 2+ stools"
+              }
+            />
           </div>
 
           <Card>
@@ -345,7 +354,10 @@ function LogTable({ events, unit, empty }: { events: LogEvent[]; unit: Unit; emp
                   <TableCell className="tabular-nums">{format(new Date(e.start), "MMM d, h:mm a")}</TableCell>
                   <TableCell>
                     <span className="flex items-center gap-2">
-                      <EventIcon event={e} className="size-6 [&_svg]:size-3.5" />
+                      <EventIcon
+                        event={e}
+                        className={isPairKind(e.kind) ? "size-6 [&_svg]:size-2.5" : "size-6 [&_svg]:size-3.5"}
+                      />
                       {eventTitle(e)}
                     </span>
                   </TableCell>

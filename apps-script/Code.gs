@@ -17,7 +17,8 @@ var DEFAULT_SETTINGS = [
   ['feedMinH', 2, 'Hours after a feeding starts when the next window opens'],
   ['feedMaxH', 4, 'Hours after a feeding starts when the next one is due'],
   ['medIntervalH', 4, "Hours between mom's doses (alternating ibuprofen and Tylenol)"],
-  ['diaperCheckH', 3, 'Hours between diaper checks'],
+  ['diaperAfterChangeH', 2, 'Hours until the next diaper check after a wet or stool diaper'],
+  ['diaperAfterCleanH', 1, 'Hours until the next check after one that found the diaper clean'],
   ['appUrl', 'https://atpia.github.io/carolina-tracker/', 'Where the app is hosted, used for setup links'],
   ['apiUrl', '', 'Web app URL from Deploy → Manage deployments (ends in /exec), used for setup links'],
   ['discordWebhook', '', 'Discord channel webhook URL for reminders (leave blank for none)'],
@@ -204,7 +205,8 @@ function clientSettings_() {
     feedMinH: Number(s.feedMinH),
     feedMaxH: Number(s.feedMaxH),
     medIntervalH: Number(s.medIntervalH),
-    diaperCheckH: Number(s.diaperCheckH),
+    diaperAfterChangeH: Number(s.diaperAfterChangeH),
+    diaperAfterCleanH: Number(s.diaperAfterCleanH),
   };
 }
 
@@ -416,7 +418,8 @@ function checkReminders() {
     var check = latest_(events, function (e) { return e.type === 'diaper'; });
     if (check) {
       var checkedAt = new Date(check.start).getTime();
-      once('diaper:' + check.id, checkedAt + Number(s.diaperCheckH) * H,
+      var wait = check.kind === 'dry' ? Number(s.diaperAfterCleanH) : Number(s.diaperAfterChangeH);
+      once('diaper:' + check.id, checkedAt + wait * H,
         '🧷 Time for a diaper check. Last checked ' + ts_(checkedAt, 'R') + ' by ' + check.by + '.');
     }
   }

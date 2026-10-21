@@ -6,6 +6,13 @@ import { DEFAULT_SETTINGS, type LogEvent, type Session } from "@/lib/types"
 
 const POLL_MS = 30_000
 
+function definedOnly<T extends object>(obj: T | undefined): Partial<T> {
+  if (!obj) return {}
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined && v !== null && !Number.isNaN(v)),
+  ) as Partial<T>
+}
+
 export function useTracker(conn: Connection) {
   const backend = useMemo(() => createBackend(conn), [conn])
   const [session, setSession] = useState<Session | null>(null)
@@ -89,7 +96,8 @@ export function useTracker(conn: Connection) {
   return {
     user: session?.user ?? "",
     users: session?.users ?? [],
-    settings: session?.settings ?? DEFAULT_SETTINGS,
+    // Fill gaps from defaults so an older Sheet script without newer settings still works.
+    settings: { ...DEFAULT_SETTINGS, ...definedOnly(session?.settings) },
     sessionError: !session ? error : null,
     events,
     loading,

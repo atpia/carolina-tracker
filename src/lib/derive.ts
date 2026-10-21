@@ -31,7 +31,10 @@ export function deriveStatus(events: LogEvent[], settings: Settings) {
 
   const feedFrom = lastFeed ? t(lastFeed.start) + settings.feedMinH * HOUR : undefined
   const feedBy = lastFeed ? t(lastFeed.start) + settings.feedMaxH * HOUR : undefined
-  const nextCheck = lastCheck ? t(lastCheck.start) + settings.diaperCheckH * HOUR : undefined
+  // A change starts a longer wait; a clean check only pushes the next check out a little.
+  const nextCheck = lastCheck
+    ? t(lastCheck.start) + (lastCheck.kind === "dry" ? settings.diaperAfterCleanH : settings.diaperAfterChangeH) * HOUR
+    : undefined
   const nextMedKind: MedKind = lastMed?.kind === "ibuprofen" ? "tylenol" : "ibuprofen"
   const nextMedAt = lastMed ? t(lastMed.start) + settings.medIntervalH * HOUR : undefined
 

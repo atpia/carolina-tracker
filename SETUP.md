@@ -22,7 +22,7 @@ Back in the Sheet you'll now have three tabs along the bottom (you may need to r
 | --- | --- |
 | **Events** | Every feeding, diaper and dose. Each row records who logged it and who last edited it. Deleted entries stay here with `deleted = TRUE`, so nothing is ever lost. |
 | **Users** | One row per caregiver with their personal code. Rename "Caregiver 2" and "Caregiver 3" to real names. |
-| **Settings** | Feeding window (2 to 4 hours), medication interval (4 hours), diaper check interval (3 hours), Discord options. |
+| **Settings** | Feeding window (2 to 4 hours), medication interval (4 hours), diaper checks (2 hours after a change, 1 hour after a clean check), Discord options. |
 
 ## 2. Turn the script into a web app
 
@@ -61,7 +61,7 @@ To remove someone's access, set their `active` cell to `FALSE` in the Users tab.
 
 The script checks every 5 minutes and posts once for each of these:
 - 🍼 the feeding window opens (2 hours after the last feeding started), and ⏰ again if no one has fed her by 4 hours
-- 🧷 a diaper check is due (3 hours after the last diaper entry, including "checked, clean")
+- 🧷 a diaper check is due: 2 hours after a wet or stool diaper, or 1 hour after a check that found it clean
 - 💊 mom's next dose is allowed, naming which medication is next
 
 Times in the messages show in each person's own time zone. Turn individual reminders on or off with `remindFeeding`, `remindDiaper` and `remindMeds`. Set `announceEntries` to `TRUE` if you also want a message every time someone logs something.

@@ -28,7 +28,10 @@ export interface Settings {
   feedMinH: number
   feedMaxH: number
   medIntervalH: number
-  diaperCheckH: number
+  /** Hours until the next check after a wet or stool diaper. */
+  diaperAfterChangeH: number
+  /** Hours until the next check after a check that found it clean. */
+  diaperAfterCleanH: number
 }
 
 export interface Session {
@@ -42,7 +45,8 @@ export const DEFAULT_SETTINGS: Settings = {
   feedMinH: 2,
   feedMaxH: 4,
   medIntervalH: 4,
-  diaperCheckH: 3,
+  diaperAfterChangeH: 2,
+  diaperAfterCleanH: 1,
 }
 
 export const FEED_LABELS: Record<FeedKind, string> = {
