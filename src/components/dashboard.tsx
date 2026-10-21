@@ -23,7 +23,7 @@ import { Separator } from "@/components/ui/separator"
 import { useNow } from "@/hooks/use-now"
 import { newId } from "@/lib/api"
 import type { Status } from "@/lib/derive"
-import { formatClock, formatClockRange, formatDuration, formatTimer, relative } from "@/lib/time"
+import { HOUR, formatClock, formatClockRange, formatDuration, formatTimer, relative } from "@/lib/time"
 import { MED_LABELS, isBottle, type DiaperKind, type LogEvent, type PainMedKind } from "@/lib/types"
 import { formatAmount, type Unit } from "@/lib/units"
 import { cn } from "@/lib/utils"
@@ -70,6 +70,7 @@ export function Dashboard({
           <ActiveFeed key={event.id} event={event} now={now} onOpen={onOpen} onSave={onSave} />
         ),
       )}
+      <MedsDue status={status} now={now} quickLog={quickLog} />
       <FeedingCard status={status} now={now} unit={unit} onOpen={onOpen} />
       <DiaperCard status={status} babyName={babyName} now={now} onOpen={onOpen} quickLog={quickLog} />
       <MedCard status={status} now={now} onOpen={onOpen} quickLog={quickLog} />
@@ -117,6 +118,75 @@ function ActiveFeed({
         <Button size="lg" variant="outline" onClick={() => onOpen({ ...event, edit: true })}>
           <Pencil /> Edit
         </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Pain relievers stop nagging after a day without a dose, in case mom no longer needs them. */
+const MED_BANNER_WINDOW = 24 * HOUR
+
+/** Stays at the top while mom can take something: the next pain reliever once it's allowed, and today's probiotics. */
+function MedsDue({
+  status,
+  now,
+  quickLog,
+}: {
+  status: Status
+  now: number
+  quickLog: (partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) => Promise<void>
+}) {
+  const { nextMedKind, nextMedAt, lastMed, meds, probioticToday } = status
+  const painReady =
+    lastMed !== undefined && nextMedAt !== undefined && now >= nextMedAt && now - t(lastMed.start) < MED_BANNER_WINDOW
+  const probioticDue = !probioticToday
+  if (!painReady && !probioticDue) return null
+
+  const PainIcon = kindIcon("med", nextMedKind)
+  const ProbioticIcon = kindIcon("med", "probiotic")
+  return (
+    <Card className="border-med/40 bg-med/10 gap-3">
+      <CardHeader>
+        <CardDescription className="text-med flex items-center gap-1.5 font-medium">
+          <TYPE_ICONS.med className="size-4" /> Mom can take
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {painReady && (
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-lg font-semibold">{MED_LABELS[nextMedKind]}</div>
+              <div className="text-muted-foreground text-sm">
+                Allowed since {formatClock(nextMedAt)} ({relative(nextMedAt, now)})
+              </div>
+            </div>
+            <Button
+              onClick={() =>
+                quickLog(
+                  { type: "med", kind: nextMedKind, doseMg: meds[nextMedKind].last?.doseMg },
+                  `${MED_LABELS[nextMedKind]} logged`,
+                )
+              }
+            >
+              <PainIcon /> Took it
+            </Button>
+          </div>
+        )}
+        {painReady && probioticDue && <Separator />}
+        {probioticDue && (
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-lg font-semibold">Probiotics</div>
+              <div className="text-muted-foreground text-sm">Not taken yet today</div>
+            </div>
+            <Button
+              variant={painReady ? "outline" : "default"}
+              onClick={() => quickLog({ type: "med", kind: "probiotic" }, "Probiotics logged")}
+            >
+              <ProbioticIcon /> Took it
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
