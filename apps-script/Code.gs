@@ -35,7 +35,11 @@ var NUMBER_FIELDS = { amountStartMl: true, amountEndMl: true, percent: true, con
 var EDITABLE_FIELDS = [
   'type', 'kind', 'start', 'end', 'amountStartMl', 'amountEndMl', 'percent', 'confidence', 'doseMg', 'notes',
 ];
-var TYPES = { feeding: true, diaper: true, med: true };
+var KINDS = {
+  feeding: { left: true, right: true, both: true, formula: true, expressed: true },
+  diaper: { wet: true, stool: true, both: true, dry: true },
+  med: { ibuprofen: true, tylenol: true },
+};
 
 // ---------------------------------------------------------------------------
 // Menu and one-time setup
@@ -58,6 +62,8 @@ function setup() {
   events.getRange('L:M').setNumberFormat('yyyy-mm-dd h:mm am/pm');
 
   var users = ensureSheet_(ss, 'Users', USER_HEADERS);
+  // A Users tab from an older version may be missing the setupLink header.
+  users.getRange(1, 1, 1, USER_HEADERS.length).setValues([USER_HEADERS]).setFontWeight('bold');
   users.setFrozenRows(1);
   if (users.getLastRow() < 2) {
     users.getRange(2, 1, 3, 3).setValues([
@@ -91,12 +97,13 @@ function onOpen() {
     .addItem('3. Turn on Discord reminders', 'enableReminders')
     .addSeparator()
     .addItem('Send a test Discord message', 'testDiscord')
-    .addItem('Turn off Discord reminders', 'disableReminders')
+    .addItem('Turn off Discord reminders', 'turnOffReminders')
     .addToUi();
 }
 
 function refreshSetupLinks() {
-  var settings = readSettings_();
+  // Defaults fill a cleared appUrl, so a link can't start with "#api=".
+  var settings = settingsWithDefaults_();
   var webAppUrl = String(settings.apiUrl || '').trim();
   var sheet = SpreadsheetApp.getActive().getSheetByName('Users');
   if (!sheet || sheet.getLastRow() < 2) return;
@@ -106,7 +113,9 @@ function refreshSetupLinks() {
     return [String(settings.appUrl) + '#api=' + encodeURIComponent(webAppUrl) + '&code=' + encodeURIComponent(r[1])];
   });
   sheet.getRange(2, 4, links.length, 1).setValues(links);
-  if (webAppUrl) toast_('Setup links updated. Send each person only their own link.');
+  toast_(webAppUrl
+    ? 'Setup links updated. Send each person only their own link.'
+    : 'Paste the web app URL into Settings → apiUrl first.');
 }
 
 function ensureSheet_(ss, name, headers) {
@@ -165,7 +174,10 @@ function handle_(req, user) {
     case 'list':
       return listEvents_(Number(req.days) || 7);
     case 'save':
-      return withLock_(function () { return saveEvent_(req.event, user); });
+      var saved = withLock_(function () { return saveEvent_(req.event, user); });
+      // Posting to Discord after the lock is released keeps a slow Discord from holding up other phones.
+      if (saved.created) announce_(saved.event);
+      return saved.event;
     case 'delete':
       return withLock_(function () { return deleteEvent_(req.id, user); });
     default:
@@ -341,11 +353,27 @@ function findRow_(id) {
 }
 
 function validate_(e) {
-  if (!e || !TYPES[e.type]) throw new Error('Unknown entry type');
+  if (!e || !KINDS.hasOwnProperty(e.type)) throw new Error('Unknown entry type');
   if (!e.kind) throw new Error('Missing entry kind');
+  if (!KINDS[e.type].hasOwnProperty(e.kind)) throw new Error('Unknown kind for this entry type');
   if (!e.start || isNaN(new Date(e.start).getTime())) throw new Error('Missing start time');
+  // Ten minutes of slack for phone clocks. listEvents_ also counts on entries not starting in the future.
+  if (new Date(e.start).getTime() > Date.now() + 10 * 60000) throw new Error('The start time is in the future');
   if (e.end && isNaN(new Date(e.end).getTime())) throw new Error('Bad end time');
   if (e.notes && String(e.notes).length > 1000) throw new Error('Notes are too long');
+  checkNumber_(e.percent, 0, 100, 'Percent');
+  checkNumber_(e.confidence, 1, 5, 'Confidence');
+  checkNumber_(e.amountStartMl, 0, Infinity, 'Amount offered');
+  checkNumber_(e.amountEndMl, 0, Infinity, 'Amount left over');
+  checkNumber_(e.doseMg, 0, Infinity, 'Dose');
+}
+
+function checkNumber_(v, min, max, name) {
+  if (v === undefined || v === null || v === '') return;
+  var n = Number(v);
+  if (isNaN(n) || n < min || n > max) {
+    throw new Error(name + (max === Infinity ? " can't be negative" : ' must be between ' + min + ' and ' + max));
+  }
 }
 
 function saveEvent_(input, user) {
@@ -366,10 +394,9 @@ function saveEvent_(input, user) {
     event = { id: String(input.id || Utilities.getUuid()), by: user, createdAt: now, updatedAt: now };
     EDITABLE_FIELDS.forEach(function (f) { event[f] = input[f]; });
     sheet.appendRow(eventToRow_(event));
-    announce_(event);
   }
   delete event.deleted;
-  return event;
+  return { event: event, created: !row };
 }
 
 function deleteEvent_(id, user) {
@@ -402,13 +429,19 @@ function ts_(ms, style) {
   return '<t:' + Math.floor(ms / 1000) + ':' + (style || 't') + '>';
 }
 
-function postDiscord_(content) {
-  var url = String(settingsWithDefaults_().discordWebhook || '').trim();
+function postDiscord_(content, settings) {
+  var s = settings || settingsWithDefaults_();
+  var url = String(s.discordWebhook || '').trim();
   if (!url) return false;
   var res = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ content: content, username: settingsWithDefaults_().babyName + ' tracker' }),
+    payload: JSON.stringify({
+      content: content,
+      username: s.babyName + ' tracker',
+      // A name or note containing @everyone or a role mention can't ping the whole server.
+      allowed_mentions: { parse: [] },
+    }),
     muteHttpExceptions: true,
   });
   return res.getResponseCode() < 300;
@@ -418,7 +451,7 @@ function announce_(e) {
   var s = settingsWithDefaults_();
   if (!truthy_(s.announceEntries)) return;
   try {
-    postDiscord_('📝 ' + e.by + ' logged **' + label_(e) + '** at ' + ts_(new Date(e.start).getTime()));
+    postDiscord_('📝 ' + e.by + ' logged **' + label_(e) + '** at ' + ts_(new Date(e.start).getTime()), s);
   } catch (err) {
     Logger.log(err);
   }
@@ -434,9 +467,19 @@ function testDiscord() {
 }
 
 function enableReminders() {
+  if (!String(settingsWithDefaults_().discordWebhook || '').trim()) {
+    toast_('Paste a Discord webhook URL into Settings → discordWebhook first, then turn reminders on.');
+    return;
+  }
   disableReminders();
   ScriptApp.newTrigger('checkReminders').timeBased().everyMinutes(5).create();
   toast_('Discord reminders are on. They are checked every 5 minutes.');
+}
+
+/** The menu item. disableReminders stays silent so enableReminders can reuse it. */
+function turnOffReminders() {
+  disableReminders();
+  toast_('Discord reminders are off.');
 }
 
 function disableReminders() {
@@ -511,7 +554,7 @@ function checkReminders() {
     }
   }
 
-  if (messages.length && postDiscord_(messages.join('\n'))) {
+  if (messages.length && postDiscord_(messages.join('\n'), s)) {
     props.setProperty('sentReminders', JSON.stringify(sent.slice(-100)));
   }
 }

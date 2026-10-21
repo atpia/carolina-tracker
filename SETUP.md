@@ -50,17 +50,18 @@ The home screen app keeps its own storage on iPhone, which is why the link gets 
 1. Open the personal setup link in Chrome. It connects right away.
 2. Tap **⋮ → Add to Home screen** (or **Install app**).
 
-To remove someone's access, set their `active` cell to `FALSE` in the Users tab. To give them a new code, type any new code in the `code` cell (letters, numbers and dashes) and run **Refresh setup links** again.
+To remove someone's access, set their `active` cell to `FALSE` in the Users tab. Their phone shows "Couldn't sign in" the next time it syncs, and keeps any entries it hadn't synced yet in case the code works again. To give them a new code, type any new code in the `code` cell (letters, numbers and dashes) and run **Refresh setup links** again.
 
 ## 4. Discord reminders (optional)
 
 1. In Discord, open **Server Settings → Integrations → Webhooks → New Webhook**. Pick the channel, give it a name, then **Copy Webhook URL**.
 2. Paste that URL into `discordWebhook` in the Sheet's Settings tab.
 3. Click **Baby tracker → Send a test Discord message** and check the channel.
-4. Click **Baby tracker → 3. Turn on Discord reminders**. Google may ask for permission once more.
+4. Click **Baby tracker → 3. Turn on Discord reminders**. Google may ask for permission once more. If `discordWebhook` is blank, it says so instead of turning reminders on.
 
 The script checks every 5 minutes and posts once for each of these:
 - 🍼 the feeding window opens (2 hours after the last feeding ended), and ⏰ again if no one has fed her by 4 hours
+- ⏱️ a feeding timer has been running for 3 hours, in case someone forgot to stop it
 - 🧷 a diaper check is due: 2 hours after a wet or stool diaper, or 1 hour after a check that found it clean
 - 💊 mom's next dose is allowed, naming which medication is next
 
