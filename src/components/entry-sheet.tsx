@@ -74,10 +74,20 @@ function parseNum(value: string) {
   return Number.isFinite(n) ? n : undefined
 }
 
-function KindOption({ type, kind, label }: { type: EventType; kind: string; label: string }) {
+function KindOption({
+  type,
+  kind,
+  label,
+  className,
+}: {
+  type: EventType
+  kind: string
+  label: string
+  className?: string
+}) {
   const Icon = kindIcon(type, kind)
   return (
-    <ToggleGroupItem value={kind}>
+    <ToggleGroupItem value={kind} className={className}>
       <Icon /> {label}
     </ToggleGroupItem>
   )
@@ -174,10 +184,15 @@ export function EntrySheet({
                   <>
                     <Field>
                       <FieldTitle>Breast</FieldTitle>
-                      <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>
+                      <ToggleGroup
+                        type="single"
+                        value={event.kind}
+                        onValueChange={(v) => v && set({ kind: v })}
+                        className="grid grid-cols-2"
+                      >
                         <KindOption type="feeding" kind="left" label="Left" />
                         <KindOption type="feeding" kind="right" label="Right" />
-                        <KindOption type="feeding" kind="both" label="Both" />
+                        <KindOption type="feeding" kind="both" label="Both sides" className="col-span-2 h-12" />
                       </ToggleGroup>
                       <FieldTitle className="mt-1">Bottle</FieldTitle>
                       <ToggleGroup type="single" value={event.kind} onValueChange={(v) => v && set({ kind: v })}>

@@ -356,7 +356,7 @@ function LogTable({ events, unit, empty }: { events: LogEvent[]; unit: Unit; emp
                     <span className="flex items-center gap-2">
                       <EventIcon
                         event={e}
-                        className={isPairKind(e.kind) ? "size-6 [&_svg]:size-2.5" : "size-6 [&_svg]:size-3.5"}
+                        className={isPairKind(e.type, e.kind) ? "size-6 [&_svg]:size-2.5" : "size-6 [&_svg]:size-3.5"}
                       />
                       {eventTitle(e)}
                     </span>

@@ -1,4 +1,4 @@
-import { Baby, CircleStop, Milk, Pencil, Plus } from "lucide-react"
+import { CircleStop, Pencil, Plus } from "lucide-react"
 import { toast } from "sonner"
 
 import type { Draft } from "@/components/entry-sheet"
@@ -161,20 +161,18 @@ function FeedingCard({
             </button>
           </>
         )}
-        <div className="grid grid-cols-2 gap-2">
-          <Button size="lg" onClick={() => onOpen({ type: "feeding", kind: lastSideSuggestion(lastFeed) })}>
-            <Baby /> Breast
-          </Button>
-          <Button
-            size="lg"
-            variant="secondary"
-            onClick={() =>
-              onOpen({ type: "feeding", kind: lastFeed && isBottle(lastFeed.kind) ? lastFeed.kind : "formula" })
-            }
-          >
-            <Milk /> Bottle
-          </Button>
-        </div>
+        <Button
+          size="lg"
+          className="w-full"
+          onClick={() =>
+            onOpen({
+              type: "feeding",
+              kind: lastFeed && isBottle(lastFeed.kind) ? lastFeed.kind : lastSideSuggestion(lastFeed),
+            })
+          }
+        >
+          <Plus /> Add feed
+        </Button>
         {lastFeed && !isBottle(lastFeed.kind) && lastFeed.kind !== "both" && (
           <p className="text-muted-foreground -mt-2 text-xs">
             Last side was {lastFeed.kind}, so the form starts on the {lastSideSuggestion(lastFeed)}.

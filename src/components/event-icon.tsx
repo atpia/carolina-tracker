@@ -12,7 +12,7 @@ export function EventIcon({ event, className }: { event: Pick<LogEvent, "type" |
   const Icon = kindIcon(event.type, event.kind)
   return (
     <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full", TONES[event.type], className)}>
-      <Icon className={isPairKind(event.kind) ? "size-3" : "size-4.5"} />
+      <Icon className={isPairKind(event.type, event.kind) ? "size-3" : "size-4.5"} />
     </span>
   )
 }
