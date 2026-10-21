@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
+import { entryName } from "@/components/describe"
 import { createBackend, isAuthError, isNetworkError, isRetryable, type Connection } from "@/lib/api"
 import { DEFAULT_SETTINGS, type LogEvent, type Session } from "@/lib/types"
 
@@ -121,7 +122,8 @@ export function useTracker(conn: Connection) {
           if (isRetryable(e)) return
           // Signed out: keep it for when this code works again.
           if (onAuthError(e)) return
-          toast.error(`Couldn't sync an entry: ${(e as Error).message}`)
+          const what = next.op === "save" ? entryName(next.event) : "a deleted entry"
+          toast.error(`Couldn't sync ${what}: ${(e as Error).message}`)
         }
         mutations.current++
         setQueue(queue.current.filter((q) => q !== next))
