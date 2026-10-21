@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { AuthError, createBackend, isAuthError, isRetryable, NetworkError, ServerError } from "./api"
+import {
+  AuthError,
+  connectErrorMessage,
+  createBackend,
+  isAuthError,
+  isRetryable,
+  NetworkError,
+  ServerError,
+} from "./api"
 
 const backend = createBackend({ api: "https://script.example/exec", code: "abcd-efgh-jkmn" })
 
@@ -80,5 +88,24 @@ describe("RemoteBackend errors", () => {
   it("recognizes the invalid code message from older scripts", async () => {
     reply(JSON.stringify({ ok: false, error: "That code is not valid. Ask for your personal setup link." }))
     expect(isAuthError(await failure())).toBe(true)
+  })
+})
+
+describe("connectErrorMessage", () => {
+  const notScript = "That link doesn't look like the tracker's script URL. It should end in /exec."
+
+  it("explains a link to the app page instead of the script", async () => {
+    reply("Method not allowed", 405)
+    expect(connectErrorMessage(await failure())).toBe(notScript)
+  })
+
+  it("explains a link to some other page", async () => {
+    reply("<html>Hello</html>")
+    expect(connectErrorMessage(await failure())).toBe(notScript)
+  })
+
+  it("passes on the script's own message", async () => {
+    reply(JSON.stringify({ ok: false, error: "That code is not valid. Ask for your personal setup link." }))
+    expect(connectErrorMessage(await failure())).toBe("That code is not valid. Ask for your personal setup link.")
   })
 })

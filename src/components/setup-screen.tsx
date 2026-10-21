@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
-import { createBackend, isNetworkError, type Connection } from "@/lib/api"
+import { connectErrorMessage, createBackend, type Connection } from "@/lib/api"
 
 /** Accepts a full personal setup link pasted into the first field. */
 function parseSetupLink(text: string): Connection | null {
@@ -39,7 +39,7 @@ export function SetupScreen({
       await createBackend(conn).session()
       onConnect(conn)
     } catch (e) {
-      setError(isNetworkError(e) ? "Couldn't reach the tracker. Check the link." : (e as Error).message)
+      setError(connectErrorMessage(e))
     } finally {
       setBusy(false)
     }

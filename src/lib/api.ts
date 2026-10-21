@@ -79,6 +79,15 @@ export function isAuthError(e: unknown) {
   return e instanceof AuthError
 }
 
+/** What the connect screen says when a link doesn't work. */
+export function connectErrorMessage(e: unknown) {
+  if (isNetworkError(e)) return "Couldn't reach the tracker. Check the link."
+  // The app's own page refuses a POST with 405, and any other page isn't the script's JSON.
+  if (e instanceof ServerError && e.reason !== "busy")
+    return "That link doesn't look like the tracker's script URL. It should end in /exec."
+  return (e as Error).message
+}
+
 // Scripts from before the `auth` flag only send this message for a code they don't accept.
 const OLD_AUTH_MESSAGE = /^That code is not valid/
 
