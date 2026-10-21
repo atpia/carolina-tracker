@@ -424,7 +424,7 @@ function MedCard({
       <AlertDialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>This is earlier than the schedule</AlertDialogTitle>
+            <AlertDialogTitle>That's earlier than scheduled</AlertDialogTitle>
             <AlertDialogDescription>{confirm?.reason} Log it anyway?</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
