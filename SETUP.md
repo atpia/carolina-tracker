@@ -63,6 +63,7 @@ The script checks every 5 minutes and posts once for each of these:
 - 🍼 the feeding window opens (2 hours after the last feeding ended), and ⏰ again if no one has fed her by 4 hours
 - ⏱️ a feeding timer has been running for 3 hours, in case someone forgot to stop it
 - 🧷 a diaper check is due: 2 hours after a wet or stool diaper, or 1 hour after a check that found it clean
+- ⏰ a running breastfeeding timer passes `breastLimitMin` minutes (15 by default, 0 turns it off). A both-sides feed gets a 🔄 switch nudge at the limit and the warning at twice it. Reminders run every 5 minutes, so this can arrive a few minutes after the app starts flashing
 - 💊 mom's next dose is allowed, naming which medication is next
 - 🌿 mom's probiotics haven't been logged yet that day, at the hour in `probioticReminderHour` (20, so 8 PM, by default; type `off` to skip it). The hour uses the script's time zone, set under Project Settings in the Apps Script editor
 - ☀️ the baby's Vitamin D hasn't been logged yet that day, at the hour in `vitaminDReminderHour` (also 20 by default; `off` skips it)

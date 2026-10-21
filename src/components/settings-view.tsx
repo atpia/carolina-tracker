@@ -131,6 +131,11 @@ export function SettingsView({
         <CardContent className="grid gap-1 text-sm">
           <Row label="Feeding window" value={`${settings.feedMinH} to ${settings.feedMaxH} hours`} />
           <Separator />
+          <Row
+            label="Breastfeeding limit"
+            value={settings.breastLimitMin > 0 ? `${settings.breastLimitMin} min per side` : "Off"}
+          />
+          <Separator />
           <Row label="Medication every" value={`${settings.medIntervalH} hours, alternating`} />
           <Separator />
           <Row label="Diaper check after a change" value={`${settings.diaperAfterChangeH} hours`} />

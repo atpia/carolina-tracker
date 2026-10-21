@@ -16,6 +16,7 @@ var DEFAULT_SETTINGS = [
   ['babyName', 'Carolina', 'Shown at the top of the app'],
   ['feedMinH', 2, 'Hours after a feeding ends when the next window opens'],
   ['feedMaxH', 4, 'Hours after a feeding ends when the next one is due'],
+  ['breastLimitMin', 15, 'Minutes per breast before a running breastfeeding timer flashes and Discord is told (0 turns it off)'],
   ['medIntervalH', 4, "Hours between mom's doses (alternating ibuprofen and Tylenol)"],
   ['diaperAfterChangeH', 2, 'Hours until the next diaper check after a wet or stool diaper'],
   ['diaperAfterCleanH', 1, 'Hours until the next check after one that found the diaper clean'],
@@ -238,6 +239,7 @@ function clientSettings_() {
     diaperAfterCleanH: Number(s.diaperAfterCleanH),
     targetFeedsPerDay: Number(s.targetFeedsPerDay),
     targetWetPerDay: Number(s.targetWetPerDay),
+    breastLimitMin: Number(s.breastLimitMin) || 0,
   };
 }
 
@@ -531,8 +533,21 @@ function checkReminders() {
     var feed = latest_(events, function (e) { return e.type === 'feeding'; });
     if (feed && !feed.end) {
       // Still going: no window yet, the same as the app. A timer this old was probably never stopped.
-      once('feedstale:' + feed.id, new Date(feed.start).getTime() + STALE_TIMER_H * H,
+      var startedAt = new Date(feed.start).getTime();
+      once('feedstale:' + feed.id, startedAt + STALE_TIMER_H * H,
         '⏱️ Feeding timer has been running ' + STALE_TIMER_H + ' hours. Did someone forget to stop it?');
+      // Matches breastLimit() in the app: a "both sides" feed gets the limit on each side.
+      var limit = Number(s.breastLimitMin) || 0;
+      var breast = feed.kind === 'left' || feed.kind === 'right' || feed.kind === 'both';
+      if (limit > 0 && breast) {
+        if (feed.kind === 'both') {
+          once('feedswitch:' + feed.id, startedAt + limit * 60000,
+            '🔄 ' + limit + ' minutes on the first side. Time to switch breasts.');
+        }
+        var sides = feed.kind === 'both' ? 2 : 1;
+        once('feedlimit:' + feed.id, startedAt + sides * limit * 60000,
+          '⏰ ' + label_(feed) + ' feed has passed ' + (sides * limit) + ' minutes (started ' + ts_(startedAt) + '). Time to wrap up.');
+      }
     } else if (feed) {
       var ended = new Date(feed.end).getTime();
       var by = ended + Number(s.feedMaxH) * H;

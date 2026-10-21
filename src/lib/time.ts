@@ -1,4 +1,4 @@
-const MIN = 60_000
+export const MIN = 60_000
 export const HOUR = 60 * MIN
 
 export function formatDuration(ms: number) {

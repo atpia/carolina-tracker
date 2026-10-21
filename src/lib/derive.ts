@@ -1,4 +1,4 @@
-import { HOUR, startOfToday } from "./time"
+import { HOUR, MIN, startOfToday } from "./time"
 import {
   DAILY_KINDS,
   isBottle,
@@ -22,6 +22,17 @@ export function consumedMl(e: LogEvent): number | undefined {
   return undefined
 }
 
+/**
+ * When a running breastfeed passes the per-side limit. A "both sides" feed gets the limit for each side:
+ * a nudge to switch at one limit, and the warning at two.
+ */
+export function breastLimit(e: LogEvent, settings: Settings): { switchAt?: number; overAt?: number } {
+  const limit = settings.breastLimitMin * MIN
+  if (!(limit > 0) || isBottle(e.kind)) return {}
+  const start = t(e.start)
+  return e.kind === "both" ? { switchAt: start + limit, overAt: start + 2 * limit } : { overAt: start + limit }
+}
+
 function latest(events: LogEvent[], pred: (e: LogEvent) => boolean) {
   let best: LogEvent | undefined
   for (const e of events) {
@@ -37,7 +48,7 @@ export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.
     .filter((e) => e.type === "feeding" && !e.end)
     .sort((a, b) => t(b.start) - t(a.start))
     // A timer this old was almost certainly never stopped, so the app asks about it instead of counting on.
-    .map((event) => ({ event, stale: now - t(event.start) >= STALE_TIMER_MS }))
+    .map((event) => ({ event, stale: now - t(event.start) >= STALE_TIMER_MS, ...breastLimit(event, settings) }))
   const lastFeed = latest(events, (e) => e.type === "feeding")
   // The latest feed is still going (and not a forgotten timer), so there is no countdown yet.
   const feedRunning = activeFeeds.some((a) => !a.stale && a.event.id === lastFeed?.id)
@@ -85,6 +96,7 @@ export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.
 
   return {
     activeFeeds,
+    breastLimitMin: settings.breastLimitMin,
     feedRunning,
     lastSide,
     lastFeed,

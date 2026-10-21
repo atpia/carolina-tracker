@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { CircleCheck, CircleStop, Pencil, Plus, type LucideIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -74,11 +74,20 @@ export function Dashboard({
 
   return (
     <div className="grid gap-4">
-      {status.activeFeeds.map(({ event, stale }) =>
+      {status.activeFeeds.map(({ event, stale, switchAt, overAt }) =>
         stale ? (
           <ForgottenFeed key={event.id} event={event} now={now} onOpen={onOpen} />
         ) : (
-          <ActiveFeed key={event.id} event={event} now={now} onOpen={onOpen} onSave={onSave} />
+          <ActiveFeed
+            key={event.id}
+            event={event}
+            now={now}
+            switchAt={switchAt}
+            overAt={overAt}
+            limitMin={status.breastLimitMin}
+            onOpen={onOpen}
+            onSave={onSave}
+          />
         ),
       )}
       <MedsDue status={status} babyName={babyName} now={now} quickLog={quickLog} />
@@ -91,29 +100,87 @@ export function Dashboard({
   )
 }
 
+/** How long the switch-sides nudge flashes before it settles into a note. */
+const SWITCH_FLASH_MS = 2 * 60_000
+
 function ActiveFeed({
   event,
   now,
+  switchAt,
+  overAt,
+  limitMin,
   onOpen,
   onSave,
 }: {
   event: LogEvent
   now: number
+  /** "Both sides" feeds: when the first side reaches the limit. */
+  switchAt?: number
+  /** When the feed passes the per-side limit. The timer keeps counting. */
+  overAt?: number
+  limitMin: number
   onOpen: (draft: Draft) => void
   onSave: (event: LogEvent) => Promise<void>
 }) {
+  const over = overAt !== undefined && now >= overAt
+  const switching = !over && switchAt !== undefined && now >= switchAt
+  const flashing = over || (switching && now - switchAt! < SWITCH_FLASH_MS)
+  const alert = over ? "over" : switching ? "switch" : undefined
+
+  // One buzz each time a limit is reached, on phones that support it.
+  useEffect(() => {
+    if (alert) navigator.vibrate?.([300, 150, 300])
+  }, [alert])
+
+  let note = "Feeding in progress"
+  if (over)
+    note = `Over the ${limitMin} min ${event.kind === "both" ? "per side " : ""}limit by ${formatTimer(now - overAt!)}`
+  else if (switching) note = `${limitMin} min on the first side. Time to switch.`
+
   return (
-    <Card className="border-feed/40 bg-feed/10 gap-3">
-      <CardHeader>
-        <CardDescription className="text-feed font-medium">Feeding in progress</CardDescription>
-        <CardTitle className="text-4xl tabular-nums">{formatTimer(now - t(event.start))}</CardTitle>
+    <Card
+      className={cn(
+        "relative gap-3 overflow-hidden",
+        over ? "border-destructive/60 bg-destructive/10" : "border-feed/40 bg-feed/10",
+      )}
+    >
+      {flashing && (
+        <>
+          {/* The whole screen's edge pulses, so it's noticeable from across the room. */}
+          <div
+            aria-hidden
+            className={cn(
+              "limit-flash pointer-events-none fixed inset-0 z-40",
+              over ? "shadow-[inset_0_0_0_8px_var(--destructive)]" : "shadow-[inset_0_0_0_8px_var(--feed)]",
+            )}
+          />
+          <div
+            aria-hidden
+            className={cn(
+              "limit-flash pointer-events-none absolute inset-0",
+              over ? "bg-destructive/15" : "bg-feed/15",
+            )}
+          />
+        </>
+      )}
+      <CardHeader className="relative">
+        <CardDescription
+          role={alert ? "alert" : undefined}
+          className={cn("font-medium", over ? "text-destructive" : "text-feed")}
+        >
+          {note}
+        </CardDescription>
+        <CardTitle className={cn("text-4xl tabular-nums", over && "text-destructive")}>
+          {formatTimer(now - t(event.start))}
+        </CardTitle>
         <CardAction>
           <Badge variant="outline">{eventTitle(event)}</Badge>
         </CardAction>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-2">
+      <CardContent className="relative grid grid-cols-2 gap-2">
         <Button
           size="lg"
+          variant={over ? "destructive" : "default"}
           onClick={async () => {
             const done = { ...event, end: new Date().toISOString() }
             try {

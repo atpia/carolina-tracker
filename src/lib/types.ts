@@ -45,6 +45,8 @@ export interface Settings {
   /** Daily goals shown on the Today card. 0 hides a goal. */
   targetFeedsPerDay: number
   targetWetPerDay: number
+  /** Minutes per breast before a running timer flashes. 0 turns the warning off. */
+  breastLimitMin: number
 }
 
 export interface Session {
@@ -62,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diaperAfterCleanH: 1,
   targetFeedsPerDay: 0,
   targetWetPerDay: 0,
+  breastLimitMin: 15,
 }
 
 export const FEED_LABELS: Record<FeedKind, string> = {

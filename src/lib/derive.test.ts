@@ -161,3 +161,22 @@ describe("temperature", () => {
     expect(s.lastTemp?.tempC).toBe(37.4)
   })
 })
+
+describe("breastfeeding limit", () => {
+  it("warns after the limit on one side and at twice it for both sides", () => {
+    const s = deriveStatus([ev("feeding", "left", 0.1), ev("feeding", "both", 0.2)], DEFAULT_SETTINGS)
+    const left = s.activeFeeds.find((a) => a.event.kind === "left")!
+    const both = s.activeFeeds.find((a) => a.event.kind === "both")!
+    expect(left.overAt).toBe(NOW - 0.1 * HOUR + 15 * 60_000)
+    expect(left.switchAt).toBeUndefined()
+    expect(both.switchAt).toBe(NOW - 0.2 * HOUR + 15 * 60_000)
+    expect(both.overAt).toBe(NOW - 0.2 * HOUR + 30 * 60_000)
+  })
+
+  it("is off at 0 and for bottles", () => {
+    const off = deriveStatus([ev("feeding", "left", 0.1)], { ...DEFAULT_SETTINGS, breastLimitMin: 0 })
+    expect(off.activeFeeds[0].overAt).toBeUndefined()
+    const bottle = deriveStatus([ev("feeding", "formula", 0.1)], DEFAULT_SETTINGS)
+    expect(bottle.activeFeeds[0].overAt).toBeUndefined()
+  })
+})

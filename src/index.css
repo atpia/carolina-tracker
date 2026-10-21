@@ -106,3 +106,23 @@
     -webkit-tap-highlight-color: transparent;
   }
 }
+
+/* A breastfeeding timer past its limit: the screen edge and the timer card pulse to catch someone's eye. */
+@keyframes limit-flash {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.limit-flash {
+  animation: limit-flash 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .limit-flash {
+    animation: none;
+    opacity: 1;
+  }
+}
