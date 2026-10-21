@@ -34,7 +34,7 @@ export interface Settings {
   diaperAfterChangeH: number
   /** Hours until the next check after a check that found it clean. */
   diaperAfterCleanH: number
-  /** Daily goals shown on the Today card. */
+  /** Daily goals shown on the Today card. 0 hides a goal. */
   targetFeedsPerDay: number
   targetWetPerDay: number
 }
@@ -52,8 +52,8 @@ export const DEFAULT_SETTINGS: Settings = {
   medIntervalH: 4,
   diaperAfterChangeH: 2,
   diaperAfterCleanH: 1,
-  targetFeedsPerDay: 8,
-  targetWetPerDay: 6,
+  targetFeedsPerDay: 0,
+  targetWetPerDay: 0,
 }
 
 export const FEED_LABELS: Record<FeedKind, string> = {
