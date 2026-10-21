@@ -447,6 +447,9 @@ function latest_(events, pred) {
   return best;
 }
 
+/** Matches STALE_TIMER_MS in the app's src/lib/derive.ts. */
+var STALE_TIMER_H = 3;
+
 /** Runs every 5 minutes from a trigger. Each reminder is sent once per entry. */
 function checkReminders() {
   var s = settingsWithDefaults_();
@@ -467,9 +470,12 @@ function checkReminders() {
 
   if (truthy_(s.remindFeeding)) {
     var feed = latest_(events, function (e) { return e.type === 'feeding'; });
-    if (feed) {
-      // Count from when the feed ended, or its start while it is still going.
-      var ended = new Date(feed.end || feed.start).getTime();
+    if (feed && !feed.end) {
+      // Still going: no window yet, the same as the app. A timer this old was probably never stopped.
+      once('feedstale:' + feed.id, new Date(feed.start).getTime() + STALE_TIMER_H * H,
+        '⏱️ Feeding timer has been running ' + STALE_TIMER_H + ' hours. Did someone forget to stop it?');
+    } else if (feed) {
+      var ended = new Date(feed.end).getTime();
       var by = ended + Number(s.feedMaxH) * H;
       var key = feed.id + ':' + ended;
       once('feedopen:' + key, ended + Number(s.feedMinH) * H,
