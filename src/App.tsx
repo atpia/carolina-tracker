@@ -209,6 +209,9 @@ function Tracker({
               onOpen={setDraft}
               onSave={tracker.save}
               onRemove={tracker.remove}
+              light={
+                tracker.settings.lightControl ? { onGet: tracker.getLight, onSet: tracker.setLight } : undefined
+              }
             />
           )}
         </TabsContent>

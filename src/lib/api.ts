@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type Appointment, type LogEvent, type Place, type Session } from "./types"
+import { DEFAULT_SETTINGS, type Appointment, type LightState, type LogEvent, type Place, type Session } from "./types"
 import { startOfToday } from "./time"
 
 export interface Connection {
@@ -14,6 +14,10 @@ export interface Backend {
   remove(id: string): Promise<void>
   /** Ask the Sheet to flash the Home Assistant light for a feed past the limit. True if it did. */
   lightAlert(id: string): Promise<boolean>
+  /** Turn the Home Assistant reading light on or off, at a brightness from 1 to 100. */
+  setLight(light: LightState): Promise<LightState>
+  /** The reading light's current state in Home Assistant. */
+  getLight(): Promise<LightState>
   listAppointments(): Promise<Appointment[]>
   saveAppointment(appointment: Appointment): Promise<Appointment>
   removeAppointment(id: string): Promise<void>
@@ -166,6 +170,12 @@ class RemoteBackend implements Backend {
   lightAlert(id: string) {
     return this.call<boolean>("lightAlert", { id })
   }
+  setLight(light: LightState) {
+    return this.call<LightState>("setLight", { light: { on: light.on, brightness: light.brightness } })
+  }
+  getLight() {
+    return this.call<LightState>("getLight")
+  }
   listAppointments() {
     return this.call<Appointment[]>("listAppointments")
   }
@@ -189,6 +199,7 @@ class RemoteBackend implements Backend {
 const DEMO_KEY = "ct.demo.events"
 const DEMO_APPTS_KEY = "ct.demo.appointments"
 const DEMO_PLACES_KEY = "ct.demo.places"
+const DEMO_LIGHT_KEY = "ct.demo.light"
 const SAMPLE_PLACES: Place[] = [{ id: "p0", name: "Pediatric clinic", address: "100 Main St, Springfield" }]
 
 /** A believable week of entries so the demo, and its reports, open with something to look at. */
@@ -266,7 +277,7 @@ class DemoBackend implements Backend {
     }
   }
   async session(): Promise<Session> {
-    return { user: "Demo", users: ["Demo"], settings: DEFAULT_SETTINGS }
+    return { user: "Demo", users: ["Demo"], settings: { ...DEFAULT_SETTINGS, lightControl: true } }
   }
   async list(days: number) {
     const since = Date.now() - days * 86_400_000
@@ -287,6 +298,22 @@ class DemoBackend implements Backend {
   }
   async lightAlert() {
     return false
+  }
+  async getLight(): Promise<LightState> {
+    try {
+      return JSON.parse(localStorage.getItem(DEMO_LIGHT_KEY) ?? "null") ?? { on: false, brightness: 50 }
+    } catch {
+      return { on: false, brightness: 50 }
+    }
+  }
+  async setLight(light: LightState) {
+    const saved = { on: light.on, brightness: light.brightness, available: true }
+    try {
+      localStorage.setItem(DEMO_LIGHT_KEY, JSON.stringify(saved))
+    } catch {
+      // ignore
+    }
+    return saved
   }
   private readAppointments(): Appointment[] {
     try {

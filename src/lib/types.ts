@@ -79,6 +79,16 @@ export interface Settings {
   breastLimitMin: number
   /** The Sheet has a Home Assistant webhook to flash a light when a breastfeed passes the limit. */
   lightAlert: boolean
+  /** The Sheet can reach Home Assistant for the reading light switch and brightness slider. */
+  lightControl: boolean
+}
+
+/** The Home Assistant reading light. Brightness is 1 to 100 percent. */
+export interface LightState {
+  on: boolean
+  brightness: number
+  /** False when Home Assistant can't reach the light, e.g. it's switched off at the wall. */
+  available?: boolean
 }
 
 export interface Session {
@@ -98,6 +108,7 @@ export const DEFAULT_SETTINGS: Settings = {
   targetWetPerDay: 0,
   breastLimitMin: 15,
   lightAlert: false,
+  lightControl: false,
 }
 
 export const FEED_LABELS: Record<FeedKind, string> = {

@@ -31,6 +31,8 @@ var DEFAULT_SETTINGS = [
   ['probioticReminderHour', 20, "Hour of the day (0-23, so 20 is 8 PM) for a Discord nudge if mom's probiotics are not logged yet that day. Type off for none"],
   ['vitaminDReminderHour', 20, "Hour of the day (0-23) for a Discord nudge if the baby's Vitamin D is not logged yet that day. Type off for none"],
   ['announceEntries', false, 'Also post every new entry to Discord'],
+  ['haUrl', '', 'Your Home Assistant address (https://….ui.nabu.casa) for the reading light in the app. Its access token goes in with Baby tracker → Save Home Assistant token, not here'],
+  ['readingLight', 'light.living_room_reading_light', 'Home Assistant entity ID of the light the app can switch and dim'],
   ['haWebhookUrl', '', 'Home Assistant webhook URL (https://….ui.nabu.casa/api/webhook/…) called when a breastfeed passes breastLimitMin, to flash a light. Leave blank for none'],
   ['calendarId', '', 'Google Calendar that appointments are copied to. Filled in by "Set up appointments calendar"'],
 ];
@@ -115,6 +117,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Send a test Discord message', 'testDiscord')
     .addItem('Send a test Home Assistant alert', 'testLight')
+    .addItem('Save Home Assistant token', 'saveHaToken')
     .addItem('Turn off reminders', 'turnOffReminders')
     .addItem('Copy all appointments to the calendar again', 'resyncCalendar')
     .addToUi();
@@ -201,6 +204,10 @@ function handle_(req, user) {
       return withLock_(function () { return deleteEvent_(req.id, user); });
     case 'lightAlert':
       return lightAlert_(req.id);
+    case 'setLight':
+      return setLight_(req.light);
+    case 'getLight':
+      return readingLight_();
     case 'listAppointments':
       return listAppointments_();
     case 'saveAppointment':
@@ -271,6 +278,7 @@ function clientSettings_() {
     breastLimitMin: Number(s.breastLimitMin) || 0,
     // Only whether it's set. The URL works like a password, so it stays in the Sheet.
     lightAlert: !!String(s.haWebhookUrl || '').trim(),
+    lightControl: haReady_(s),
   };
 }
 
@@ -726,6 +734,95 @@ function postLight_(url, payload) {
   });
   if (res.getResponseCode() >= 300) Logger.log('Home Assistant answered ' + res.getResponseCode() + ': ' + res.getContentText());
   return res.getResponseCode() < 300;
+}
+
+// The reading light goes through Home Assistant's REST API with a long-lived access token. The token can do
+// anything in Home Assistant, so it lives in Script Properties (not a Sheet cell), never goes to the phones,
+// and the app can only switch and dim the one light in Settings → readingLight.
+
+function haToken_() {
+  return PropertiesService.getScriptProperties().getProperty('haToken') || '';
+}
+
+function haReady_(s) {
+  return !!(String(s.haUrl || '').trim() && String(s.readingLight || '').trim() && haToken_());
+}
+
+function lightEntity_(s) {
+  var entity = String(s.readingLight || '').trim();
+  if (!/^light\.[a-z0-9_]+$/.test(entity)) throw new Error('Settings → readingLight should look like light.living_room_reading_light');
+  return entity;
+}
+
+function haApi_(s, path, payload) {
+  if (!haReady_(s)) throw new Error('The reading light is not set up. See SETUP.md, section 7.');
+  var options = { method: payload ? 'post' : 'get', headers: { Authorization: 'Bearer ' + haToken_() }, muteHttpExceptions: true };
+  if (payload) {
+    options.contentType = 'application/json';
+    options.payload = JSON.stringify(payload);
+  }
+  var res;
+  try {
+    res = UrlFetchApp.fetch(String(s.haUrl).trim().replace(/\/+$/, '') + path, options);
+  } catch (err) {
+    Logger.log(err);
+    throw retryable_("Can't reach Home Assistant. Check Settings → haUrl, or try again in a moment.");
+  }
+  var code = res.getResponseCode();
+  if (code === 401) throw new Error('Home Assistant refused the token. Save a new one with Baby tracker → Save Home Assistant token.');
+  if (code === 404) throw new Error('Home Assistant has no ' + lightEntity_(s) + '. Check Settings → readingLight.');
+  if (code >= 300) throw new Error('Home Assistant answered ' + code + '.');
+  return JSON.parse(res.getContentText() || 'null');
+}
+
+/** The light's real state. Brightness is 1-100; while it's off, the brightness it last had from the app. */
+function readingLight_() {
+  var s = settingsWithDefaults_();
+  var state = haApi_(s, '/api/states/' + lightEntity_(s));
+  var props = PropertiesService.getScriptProperties();
+  var raw = state.attributes && state.attributes.brightness;
+  var brightness = raw ? Math.max(1, Math.round(raw / 2.55)) : Number(props.getProperty('readingLightBrightness')) || 50;
+  return { on: state.state === 'on', brightness: brightness, available: state.state !== 'unavailable' };
+}
+
+/** The app's reading light switch and slider. Brightness is 1-100. */
+function setLight_(input) {
+  var s = settingsWithDefaults_();
+  if (!input || typeof input.on !== 'boolean') throw new Error('Missing light state');
+  var brightness = Math.round(Number(input.brightness));
+  if (isNaN(brightness) || brightness < 1 || brightness > 100) throw new Error('Brightness must be between 1 and 100');
+  var entity = lightEntity_(s);
+  if (input.on) haApi_(s, '/api/services/light/turn_on', { entity_id: entity, brightness_pct: brightness });
+  else haApi_(s, '/api/services/light/turn_off', { entity_id: entity });
+  PropertiesService.getScriptProperties().setProperty('readingLightBrightness', String(brightness));
+  // Some lights report their new state a moment after the call returns, so answer with what was asked for.
+  return { on: input.on, brightness: brightness, available: true };
+}
+
+/** Menu item. Keeps the token out of the Sheet, where anyone the Sheet is shared with could read it. */
+function saveHaToken() {
+  var ui = SpreadsheetApp.getUi();
+  var answer = ui.prompt(
+    'Home Assistant token',
+    'Paste a long-lived access token (Home Assistant → your profile → Security → Long-lived access tokens). ' +
+      'It is saved in the script, not the Sheet. Leave this empty and click OK to remove the saved token.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+  var token = answer.getResponseText().trim();
+  var props = PropertiesService.getScriptProperties();
+  if (!token) {
+    props.deleteProperty('haToken');
+    toast_('Home Assistant token removed. The app hides the reading light.');
+    return;
+  }
+  props.setProperty('haToken', token);
+  try {
+    var light = readingLight_();
+    toast_('Token saved. The reading light is ' + (light.on ? 'on at ' + light.brightness + '%' : 'off') + '.');
+  } catch (err) {
+    toast_('Token saved, but: ' + err.message);
+  }
 }
 
 function testLight() {

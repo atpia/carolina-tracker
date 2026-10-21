@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import type { Draft } from "@/components/entry-sheet"
 import { eventDetails, eventTitle } from "@/components/describe"
 import { kindIcon, TYPE_ICONS } from "@/components/icons"
+import { LightCard } from "@/components/light-card"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,6 +33,7 @@ import {
   isBottle,
   type DailyKind,
   type DiaperKind,
+  type LightState,
   type LogEvent,
   type PainMedKind,
   type TempMethod,
@@ -49,6 +51,7 @@ export function Dashboard({
   onOpen,
   onSave,
   onRemove,
+  light,
 }: {
   status: Status
   user: string
@@ -57,6 +60,8 @@ export function Dashboard({
   onOpen: (draft: Draft) => void
   onSave: (event: LogEvent) => Promise<void>
   onRemove: (id: string) => Promise<void>
+  /** Shown when the Sheet has a Home Assistant reading light set up. */
+  light?: { onGet: () => Promise<LightState>; onSet: (light: LightState) => Promise<LightState> }
 }) {
   const now = useNow(1000)
 
@@ -90,6 +95,7 @@ export function Dashboard({
           />
         ),
       )}
+      {light && <LightCard onGet={light.onGet} onSet={light.onSet} />}
       <MedsDue status={status} babyName={babyName} now={now} quickLog={quickLog} />
       <FeedingCard status={status} now={now} unit={unit} onOpen={onOpen} quickLog={quickLog} />
       <DiaperCard status={status} babyName={babyName} now={now} onOpen={onOpen} quickLog={quickLog} />
