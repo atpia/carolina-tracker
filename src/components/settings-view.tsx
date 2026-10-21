@@ -32,6 +32,7 @@ export function SettingsView({
   theme,
   onTheme,
   onSignOut,
+  queued = 0,
 }: {
   user: string
   users: string[]
@@ -42,7 +43,10 @@ export function SettingsView({
   theme: Theme
   onTheme: (t: Theme) => void
   onSignOut: () => void
+  /** Entries on this phone that haven't reached the Sheet yet. */
+  queued?: number
 }) {
+  const unsynced = queued === 1 ? "1 entry on this phone hasn't" : `${queued} entries on this phone haven't`
   return (
     <div className="grid gap-4">
       <Card>
@@ -92,13 +96,15 @@ export function SettingsView({
                   <AlertDialogDescription>
                     {demo
                       ? "You'll go back to the connect screen. Demo entries stay on this phone."
-                      : "Nothing is deleted. You'll need your personal setup link to sign back in."}
+                      : queued > 0
+                        ? `${unsynced} synced. They'll sync if you sign back in with the same code.`
+                        : "Nothing is deleted. You'll need your personal setup link to sign back in."}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Stay signed in</AlertDialogCancel>
                   <AlertDialogAction variant="destructive" onClick={onSignOut}>
-                    {demo ? "Leave demo" : "Sign out"}
+                    {demo ? "Leave demo" : queued > 0 ? "Sign out anyway" : "Sign out"}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

@@ -241,6 +241,7 @@ function Tracker({
             theme={theme}
             onTheme={onTheme}
             onSignOut={onSignOut}
+            queued={tracker.queued}
           />
         </TabsContent>
       </main>
