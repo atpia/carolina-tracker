@@ -31,6 +31,7 @@ var DEFAULT_SETTINGS = [
   ['probioticReminderHour', 20, "Hour of the day (0-23, so 20 is 8 PM) for a Discord nudge if mom's probiotics are not logged yet that day. Type off for none"],
   ['vitaminDReminderHour', 20, "Hour of the day (0-23) for a Discord nudge if the baby's Vitamin D is not logged yet that day. Type off for none"],
   ['announceEntries', false, 'Also post every new entry to Discord'],
+  ['calendarId', '', 'Google Calendar that appointments are copied to. Filled in by "Set up appointments calendar"'],
 ];
 var DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
 var TEXT_FIELDS = { id: true, type: true, kind: true, notes: true, by: true, updatedBy: true };
@@ -85,6 +86,12 @@ function setup() {
     settings.getRange(settings.getLastRow() + 1, 1, missing.length, 3).setValues(missing);
   }
 
+  var appts = ensureSheet_(ss, 'Appointments', APPT_HEADERS);
+  appts.getRange(1, 1, 1, APPT_HEADERS.length).setValues([APPT_HEADERS]).setFontWeight('bold');
+  appts.setFrozenRows(1);
+  appts.getRange('C:D').setNumberFormat('yyyy-mm-dd h:mm am/pm');
+  appts.getRange('H:I').setNumberFormat('yyyy-mm-dd h:mm am/pm');
+
   var stray = ss.getSheetByName('Sheet1');
   if (stray && stray.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(stray);
 
@@ -99,9 +106,11 @@ function onOpen() {
     .addItem('1. Set up tabs and codes', 'setup')
     .addItem('2. Refresh setup links', 'refreshSetupLinks')
     .addItem('3. Turn on Discord reminders', 'enableReminders')
+    .addItem('4. Set up appointments calendar', 'setupCalendar')
     .addSeparator()
     .addItem('Send a test Discord message', 'testDiscord')
     .addItem('Turn off Discord reminders', 'turnOffReminders')
+    .addItem('Copy all appointments to the calendar again', 'resyncCalendar')
     .addToUi();
 }
 
@@ -184,6 +193,12 @@ function handle_(req, user) {
       return saved.event;
     case 'delete':
       return withLock_(function () { return deleteEvent_(req.id, user); });
+    case 'listAppointments':
+      return listAppointments_();
+    case 'saveAppointment':
+      return withLock_(function () { return saveAppointment_(req.appointment, user); });
+    case 'deleteAppointment':
+      return withLock_(function () { return deleteAppointment_(req.id, user); });
     default:
       throw new Error('Unknown action');
   }
@@ -597,5 +612,232 @@ function checkReminders() {
 
   if (messages.length && postDiscord_(messages.join('\n'), s)) {
     props.setProperty('sentReminders', JSON.stringify(sent.slice(-100)));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Appointments
+//
+// Appointments live in their own tab and are copied one way to a Google Calendar: the app creates, edits and
+// deletes the calendar event, and changes made in Google Calendar are never read back (the next save from
+// the app overwrites them).
+
+var APPT_HEADERS = [
+  'id', 'title', 'start', 'end', 'location', 'notes', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'deleted',
+  'calendarEventId', 'syncError',
+];
+var APPT_DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
+var APPT_TEXT_FIELDS = { id: true, title: true, location: true, notes: true, by: true, updatedBy: true };
+var APPT_EDITABLE_FIELDS = ['title', 'start', 'end', 'location', 'notes'];
+/** Past appointments the app still shows. */
+var APPT_PAST_DAYS = 90;
+
+/** Menu item. Makes a calendar for appointments, or checks the one in Settings → calendarId. */
+function setupCalendar() {
+  var s = settingsWithDefaults_();
+  var id = String(s.calendarId || '').trim();
+  var cal = id ? CalendarApp.getCalendarById(id) : null;
+  if (id && !cal) {
+    toast_('No calendar found for Settings → calendarId. Clear the cell to make a new one, or paste a calendar ID from Google Calendar → Settings → Integrate calendar.');
+    return;
+  }
+  if (!cal) {
+    cal = CalendarApp.createCalendar(s.babyName + "'s appointments", { color: CalendarApp.Color.PINK });
+    setSetting_('calendarId', cal.getId());
+  }
+  toast_('Appointments will show up in the "' + cal.getName() + '" calendar. Share it from Google Calendar so others see it too.');
+}
+
+/** Menu item. Copies every upcoming appointment to the calendar again, e.g. after changing calendarId. */
+function resyncCalendar() {
+  var cal = appointmentsCalendar_();
+  if (!cal) {
+    toast_('Run "Baby tracker → 4. Set up appointments calendar" first.');
+    return;
+  }
+  var n = withLock_(function () {
+    var sheet = appointmentsSheet_();
+    if (sheet.getLastRow() < 2) return 0;
+    var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, APPT_HEADERS.length).getValues();
+    var count = 0;
+    rows.forEach(function (row, i) {
+      var a = rowToAppointment_(row);
+      if (!a.id || !a.start || truthy_(a.deleted) || new Date(a.end || a.start).getTime() < Date.now()) return;
+      syncToCalendar_(a, cal);
+      sheet.getRange(i + 2, 1, 1, APPT_HEADERS.length).setValues([appointmentToRow_(a)]);
+      count++;
+    });
+    return count;
+  });
+  toast_(n === 1 ? '1 upcoming appointment copied.' : n + ' upcoming appointments copied.');
+}
+
+function setSetting_(key, value) {
+  var sheet = SpreadsheetApp.getActive().getSheetByName('Settings');
+  var rows = sheet.getLastRow() < 2 ? [] : sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === key) {
+      sheet.getRange(i + 2, 2).setValue(value);
+      return;
+    }
+  }
+  var note = DEFAULT_SETTINGS.filter(function (r) { return r[0] === key; })[0];
+  sheet.appendRow([key, value, note ? note[2] : '']);
+}
+
+function appointmentsCalendar_() {
+  var id = String(settingsWithDefaults_().calendarId || '').trim();
+  return id ? CalendarApp.getCalendarById(id) : null;
+}
+
+function appointmentsSheet_() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName('Appointments');
+  if (!sheet) throw new Error('Run "Baby tracker → 1. Set up tabs and codes" in the Sheet to add the Appointments tab.');
+  return sheet;
+}
+
+function rowToAppointment_(row) {
+  var a = {};
+  APPT_HEADERS.forEach(function (h, i) {
+    var v = row[i];
+    if (v === '' || v === null) return;
+    if (APPT_DATE_FIELDS[h]) {
+      var ms = time_(v);
+      if (!ms) return;
+      v = new Date(ms).toISOString();
+    } else if (h !== 'deleted') v = String(v);
+    a[h] = v;
+  });
+  return a;
+}
+
+function appointmentToRow_(a) {
+  return APPT_HEADERS.map(function (h) {
+    var v = a[h];
+    if (v === undefined || v === null) return '';
+    if (APPT_DATE_FIELDS[h]) return v ? new Date(v) : '';
+    if (APPT_TEXT_FIELDS[h] && v !== '') return "'" + String(v);
+    return v;
+  });
+}
+
+/** What the app gets back: the row without the Sheet's bookkeeping. */
+function clientAppointment_(a) {
+  var out = {};
+  Object.keys(a).forEach(function (k) {
+    if (k !== 'deleted' && k !== 'calendarEventId') out[k] = a[k];
+  });
+  out.synced = Boolean(a.calendarEventId) && !a.syncError;
+  return out;
+}
+
+function listAppointments_() {
+  var sheet = appointmentsSheet_();
+  if (sheet.getLastRow() < 2) return [];
+  var since = Date.now() - APPT_PAST_DAYS * 86400000;
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, APPT_HEADERS.length).getValues()
+    .map(rowToAppointment_)
+    .filter(function (a) { return a.id && a.start && !truthy_(a.deleted) && new Date(a.start).getTime() >= since; })
+    .map(clientAppointment_);
+}
+
+function findAppointmentRow_(id) {
+  var sheet = appointmentsSheet_();
+  if (!id || sheet.getLastRow() < 2) return 0;
+  var hit = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).createTextFinder(String(id)).matchEntireCell(true).findNext();
+  return hit ? hit.getRow() : 0;
+}
+
+function validateAppointment_(a) {
+  if (!a) throw new Error('Missing appointment');
+  if (!String(a.title || '').trim()) throw new Error('Give the appointment a name');
+  if (String(a.title).length > 200) throw new Error('The name is too long');
+  if (!a.start || isNaN(new Date(a.start).getTime())) throw new Error('Missing start time');
+  if (a.end) {
+    if (isNaN(new Date(a.end).getTime())) throw new Error('Bad end time');
+    if (new Date(a.end) < new Date(a.start)) throw new Error('The appointment ends before it starts');
+  }
+  if (a.location && String(a.location).length > 500) throw new Error('The location is too long');
+  if (a.notes && String(a.notes).length > 1000) throw new Error('Notes are too long');
+}
+
+function saveAppointment_(input, user) {
+  validateAppointment_(input);
+  var sheet = appointmentsSheet_();
+  var now = new Date().toISOString();
+  var row = findAppointmentRow_(input.id);
+  var a;
+  if (row) {
+    a = rowToAppointment_(sheet.getRange(row, 1, 1, APPT_HEADERS.length).getValues()[0]);
+    if (truthy_(a.deleted)) throw new Error('This appointment was deleted on another phone.');
+    a.updatedAt = now;
+    a.updatedBy = user;
+  } else {
+    a = { id: String(input.id || Utilities.getUuid()), by: user, createdAt: now, updatedAt: now };
+  }
+  APPT_EDITABLE_FIELDS.forEach(function (f) {
+    var v = input[f];
+    a[f] = typeof v === 'string' ? v.trim() : v;
+  });
+  // Save the row before touching the calendar, so a calendar problem never loses the appointment.
+  if (!row) {
+    sheet.appendRow(appointmentToRow_(a));
+    row = sheet.getLastRow();
+  }
+  syncToCalendar_(a, appointmentsCalendar_());
+  sheet.getRange(row, 1, 1, APPT_HEADERS.length).setValues([appointmentToRow_(a)]);
+  return clientAppointment_(a);
+}
+
+function deleteAppointment_(id, user) {
+  var row = findAppointmentRow_(id);
+  if (!row) return true;
+  var sheet = appointmentsSheet_();
+  var a = rowToAppointment_(sheet.getRange(row, 1, 1, APPT_HEADERS.length).getValues()[0]);
+  if (a.calendarEventId) {
+    try {
+      var cal = appointmentsCalendar_();
+      var ev = cal && cal.getEventById(a.calendarEventId);
+      if (ev) ev.deleteEvent();
+    } catch (err) {
+      Logger.log('Could not remove calendar event for appointment ' + id + ': ' + err);
+    }
+  }
+  // Soft delete like Events, so a mistaken delete can be recovered from the Sheet.
+  a.deleted = true;
+  a.updatedAt = new Date().toISOString();
+  a.updatedBy = user;
+  sheet.getRange(row, 1, 1, APPT_HEADERS.length).setValues([appointmentToRow_(a)]);
+  return true;
+}
+
+/** Create or update the calendar event for `a`, recording its ID or what went wrong on `a`. */
+function syncToCalendar_(a, cal) {
+  if (!cal) {
+    a.syncError = 'No calendar set up yet';
+    return;
+  }
+  try {
+    var start = new Date(a.start);
+    // Without an end time the calendar shows an hour.
+    var end = a.end ? new Date(a.end) : new Date(start.getTime() + 3600000);
+    if (end.getTime() === start.getTime()) end = new Date(start.getTime() + 15 * 60000);
+    var description = (a.notes ? a.notes + '\n\n' : '') +
+      'Added by ' + a.by + ' in the baby tracker app. Edit it there: changes made in Google Calendar get overwritten.';
+    var ev = a.calendarEventId ? cal.getEventById(a.calendarEventId) : null;
+    if (ev) {
+      ev.setTitle(a.title);
+      ev.setTime(start, end);
+      ev.setLocation(a.location || '');
+      ev.setDescription(description);
+    } else {
+      // Also covers an event someone deleted by hand in Google Calendar: the app's copy wins.
+      ev = cal.createEvent(a.title, start, end, { location: a.location || '', description: description });
+    }
+    a.calendarEventId = ev.getId();
+    a.syncError = '';
+  } catch (err) {
+    a.syncError = String(err && err.message ? err.message : err).slice(0, 200);
+    Logger.log('Calendar sync failed for appointment ' + a.id + ': ' + a.syncError);
   }
 }
