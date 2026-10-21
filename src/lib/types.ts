@@ -41,7 +41,10 @@ export interface Appointment {
   start: string
   /** ISO timestamp. Without one the calendar shows an hour. */
   end?: string
+  /** The address, which is what the calendar event's location gets. */
   location?: string
+  /** The saved place the address came from, shown in the app instead of the address. */
+  placeName?: string
   notes?: string
   by: string
   createdAt?: string
@@ -51,6 +54,13 @@ export interface Appointment {
   synced?: boolean
   /** Why the calendar copy failed, if it did. The appointment itself is saved either way. */
   syncError?: string
+}
+
+/** A saved name and address to pick when making an appointment. */
+export interface Place {
+  id: string
+  name: string
+  address: string
 }
 
 export interface Settings {

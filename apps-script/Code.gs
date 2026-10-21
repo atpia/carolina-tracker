@@ -92,6 +92,10 @@ function setup() {
   appts.getRange('C:D').setNumberFormat('yyyy-mm-dd h:mm am/pm');
   appts.getRange('H:I').setNumberFormat('yyyy-mm-dd h:mm am/pm');
 
+  var places = ensureSheet_(ss, 'Places', PLACE_HEADERS);
+  places.getRange(1, 1, 1, PLACE_HEADERS.length).setValues([PLACE_HEADERS]).setFontWeight('bold');
+  places.setFrozenRows(1);
+
   var stray = ss.getSheetByName('Sheet1');
   if (stray && stray.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(stray);
 
@@ -199,6 +203,12 @@ function handle_(req, user) {
       return withLock_(function () { return saveAppointment_(req.appointment, user); });
     case 'deleteAppointment':
       return withLock_(function () { return deleteAppointment_(req.id, user); });
+    case 'listPlaces':
+      return listPlaces_();
+    case 'savePlace':
+      return withLock_(function () { return savePlace_(req.place, user); });
+    case 'deletePlace':
+      return withLock_(function () { return deletePlace_(req.id); });
     default:
       throw new Error('Unknown action');
   }
@@ -624,11 +634,11 @@ function checkReminders() {
 
 var APPT_HEADERS = [
   'id', 'title', 'start', 'end', 'location', 'notes', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'deleted',
-  'calendarEventId', 'syncError',
+  'calendarEventId', 'syncError', 'placeName',
 ];
 var APPT_DATE_FIELDS = { start: true, end: true, createdAt: true, updatedAt: true };
-var APPT_TEXT_FIELDS = { id: true, title: true, location: true, notes: true, by: true, updatedBy: true };
-var APPT_EDITABLE_FIELDS = ['title', 'start', 'end', 'location', 'notes'];
+var APPT_TEXT_FIELDS = { id: true, title: true, location: true, notes: true, by: true, updatedBy: true, placeName: true };
+var APPT_EDITABLE_FIELDS = ['title', 'start', 'end', 'location', 'placeName', 'notes'];
 /** Past appointments the app still shows. */
 var APPT_PAST_DAYS = 90;
 
@@ -822,7 +832,7 @@ function syncToCalendar_(a, cal) {
     // Without an end time the calendar shows an hour.
     var end = a.end ? new Date(a.end) : new Date(start.getTime() + 3600000);
     if (end.getTime() === start.getTime()) end = new Date(start.getTime() + 15 * 60000);
-    var description = (a.notes ? a.notes + '\n\n' : '') +
+    var description = (a.placeName ? 'At ' + a.placeName + '\n\n' : '') + (a.notes ? a.notes + '\n\n' : '') +
       'Added by ' + a.by + ' in the baby tracker app. Edit it there: changes made in Google Calendar get overwritten.';
     var ev = a.calendarEventId ? cal.getEventById(a.calendarEventId) : null;
     if (ev) {
@@ -840,4 +850,57 @@ function syncToCalendar_(a, cal) {
     a.syncError = String(err && err.message ? err.message : err).slice(0, 200);
     Logger.log('Calendar sync failed for appointment ' + a.id + ': ' + a.syncError);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Saved places
+//
+// Names and addresses picked when making an appointment, e.g. "Pediatrician" at "123 Main St". The address is
+// what goes into the calendar event's location, so Google Calendar can open it in Maps.
+
+var PLACE_HEADERS = ['id', 'name', 'address', 'by', 'createdAt'];
+
+function placesSheet_() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName('Places');
+  if (!sheet) throw new Error('Run "Baby tracker → 1. Set up tabs and codes" in the Sheet to add the Places tab.');
+  return sheet;
+}
+
+function listPlaces_() {
+  var sheet = placesSheet_();
+  if (sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues()
+    .filter(function (r) { return r[0] && r[1]; })
+    .map(function (r) { return { id: String(r[0]), name: String(r[1]), address: String(r[2]) }; });
+}
+
+function findPlaceRow_(id) {
+  var sheet = placesSheet_();
+  if (!id || sheet.getLastRow() < 2) return 0;
+  var hit = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).createTextFinder(String(id)).matchEntireCell(true).findNext();
+  return hit ? hit.getRow() : 0;
+}
+
+function savePlace_(input, user) {
+  var name = String((input && input.name) || '').trim();
+  var address = String((input && input.address) || '').trim();
+  if (!name) throw new Error('Give the place a name');
+  if (name.length > 100) throw new Error('The name is too long');
+  if (address.length > 500) throw new Error('The address is too long');
+  var sheet = placesSheet_();
+  var row = findPlaceRow_(input.id);
+  var place = { id: String(input.id || Utilities.getUuid()), name: name, address: address };
+  if (row) {
+    sheet.getRange(row, 2, 1, 2).setValues([["'" + name, address ? "'" + address : '']]);
+  } else {
+    sheet.appendRow(["'" + place.id, "'" + name, address ? "'" + address : '', "'" + user, new Date()]);
+  }
+  return place;
+}
+
+/** Places are just shortcuts, so they're removed outright. Appointments keep the address they were saved with. */
+function deletePlace_(id) {
+  var row = findPlaceRow_(id);
+  if (row) placesSheet_().deleteRow(row);
+  return true;
 }
