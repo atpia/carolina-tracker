@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { LampDesk } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
@@ -62,7 +62,7 @@ export function LightCard({
       setFailed(false)
     } catch (e) {
       setLight(confirmed.current)
-      toast.error((e as Error).message || "Couldn't reach the light.")
+      toast.add({ title: (e as Error).message || "Couldn't reach the light.", type: "error" })
     } finally {
       sending.current = false
       setBusy(false)

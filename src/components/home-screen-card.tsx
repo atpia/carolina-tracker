@@ -1,5 +1,5 @@
 import { Bell, BellOff, CircleCheck, Download, Send, Share } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 
 import { PendingButton } from "@/components/pending-button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -42,7 +42,12 @@ export function HomeScreenCard({ backend, owner, demo }: { backend: Backend; own
                   variant="outline"
                   icon={Download}
                   onClick={async () => {
-                    if (await promptInstall()) toast.success("Installed. Open it from the home screen from now on.")
+                    if (await promptInstall())
+                      toast.add({
+                        title: "Installed",
+                        description: "Open it from the home screen from now on.",
+                        type: "success",
+                      })
                   }}
                 >
                   Install app
@@ -57,8 +62,7 @@ export function HomeScreenCard({ backend, owner, demo }: { backend: Backend; own
               </FieldDescription>
             ) : (
               <FieldDescription>
-                Open your browser's menu and choose <strong>Install app</strong> or{" "}
-                <strong>Add to Home screen</strong>.
+                Open your browser's menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.
               </FieldDescription>
             )}
           </Field>
@@ -68,7 +72,9 @@ export function HomeScreenCard({ backend, owner, demo }: { backend: Backend; own
             {demo ? (
               <FieldDescription>Notifications come from the Sheet, so the demo doesn't have them.</FieldDescription>
             ) : push.support === "needs-install" ? (
-              <FieldDescription>Add the app to your home screen first (see above), then turn them on there.</FieldDescription>
+              <FieldDescription>
+                Add the app to your home screen first (see above), then turn them on there.
+              </FieldDescription>
             ) : push.support === "unsupported" ? (
               <FieldDescription>This browser can't get notifications from a web app.</FieldDescription>
             ) : push.on ? (
@@ -78,10 +84,11 @@ export function HomeScreenCard({ backend, owner, demo }: { backend: Backend; own
                     variant="outline"
                     icon={Send}
                     onClick={() =>
-                      push.test().then(
-                        () => toast.success("Sent. It should arrive in a few seconds."),
-                        (e) => toast.error(pushError(e)),
-                      )
+                      toast.promise(push.test(), {
+                        loading: "Sending a test…",
+                        success: { title: "Test sent", description: "It should arrive in a few seconds." },
+                        error: (e) => ({ title: "Couldn't send a test", description: pushError(e) }),
+                      })
                     }
                   >
                     Send a test
@@ -90,10 +97,11 @@ export function HomeScreenCard({ backend, owner, demo }: { backend: Backend; own
                     variant="ghost"
                     icon={BellOff}
                     onClick={() =>
-                      push.disable().then(
-                        () => toast.success("Notifications are off on this phone."),
-                        (e) => toast.error(pushError(e)),
-                      )
+                      toast.promise(push.disable(), {
+                        loading: "Turning off notifications…",
+                        success: "Notifications are off on this phone",
+                        error: (e) => ({ title: "Couldn't turn them off", description: pushError(e) }),
+                      })
                     }
                   >
                     Turn off
@@ -114,16 +122,18 @@ export function HomeScreenCard({ backend, owner, demo }: { backend: Backend; own
                   icon={Bell}
                   disabled={push.on === null}
                   onClick={() =>
-                    push.enable().then(
-                      (r) =>
+                    toast.promise(push.enable(), {
+                      loading: "Turning on notifications…",
+                      success: (r) =>
                         r.reminders === false
-                          ? toast.warning(
-                              "Notifications are on, but the Sheet's reminders are off. In the Sheet, click Baby tracker → 3. Turn on reminders.",
-                              { duration: 10_000 },
-                            )
-                          : toast.success("Notifications are on for this phone."),
-                      (e) => toast.error(pushError(e)),
-                    )
+                          ? {
+                              title: "On, but the Sheet's reminders are off",
+                              description: "In the Sheet, click Baby tracker → 3. Turn on reminders.",
+                              timeout: 10_000,
+                            }
+                          : "Notifications are on for this phone",
+                      error: (e) => ({ title: "Couldn't turn them on", description: pushError(e) }),
+                    })
                   }
                 >
                   Turn on notifications
