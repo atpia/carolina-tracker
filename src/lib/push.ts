@@ -8,10 +8,7 @@ export type PushSupport = "ok" | "needs-install" | "unsupported"
 
 export function isIos() {
   // iPads ask for the desktop site, so they say Macintosh but have a touch screen.
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
-  )
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
 }
 
 /** Opened from the home screen rather than in a browser tab. */

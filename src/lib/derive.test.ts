@@ -193,14 +193,7 @@ describe("home screen badge", () => {
   })
 
   it("is empty when nothing is due, and counts a forgotten timer", () => {
-    expect(
-      dueCount(
-        deriveStatus([ev("feeding", "left", 1, { end: ago(0.5) }), ev("diaper", "wet", 0.5)], DEFAULT_SETTINGS),
-        NOW,
-      ),
-    ).toBe(0)
-    expect(dueCount(deriveStatus([ev("feeding", "left", 3.5), ev("diaper", "wet", 0.5)], DEFAULT_SETTINGS), NOW)).toBe(
-      1,
-    )
+    expect(dueCount(deriveStatus([ev("feeding", "left", 1, { end: ago(0.5) }), ev("diaper", "wet", 0.5)], DEFAULT_SETTINGS), NOW)).toBe(0)
+    expect(dueCount(deriveStatus([ev("feeding", "left", 3.5), ev("diaper", "wet", 0.5)], DEFAULT_SETTINGS), NOW)).toBe(1)
   })
 })
