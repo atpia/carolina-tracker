@@ -48,16 +48,28 @@ export function relative(target: number, now: number) {
   return diff > 0 ? `in ${formatDuration(diff)}` : `${formatDuration(-diff)} ago`
 }
 
-/** ISO -> value for <input type="datetime-local"> in local time. */
-export function toLocalInput(iso?: string) {
+/** ISO -> "HH:mm" in local time, the value of an <input type="time">. */
+export function toClockInput(iso?: string) {
   if (!iso) return ""
   const d = new Date(iso)
-  const off = d.getTimezoneOffset() * MIN
-  return new Date(d.getTime() - off).toISOString().slice(0, 16)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-export function fromLocalInput(value: string) {
-  return value ? new Date(value).toISOString() : ""
+/** Moves a time to another calendar day, keeping its clock time. With no time yet, it uses the clock time now. */
+export function withDay(iso: string, day: Date) {
+  const d = new Date(iso || Date.now())
+  d.setFullYear(day.getFullYear(), day.getMonth(), day.getDate())
+  if (!iso) d.setSeconds(0, 0)
+  return d.toISOString()
+}
+
+/** Sets the clock time ("HH:mm") of a time, keeping its day. With no time yet, it uses today. */
+export function withClock(iso: string, clock: string) {
+  const [h, m] = clock.split(":").map(Number)
+  const d = new Date(iso || Date.now())
+  d.setHours(h, m, 0, 0)
+  return d.toISOString()
 }
 
 export function startOfToday(now = Date.now()) {

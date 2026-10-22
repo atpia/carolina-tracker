@@ -23,6 +23,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { DateTimeField } from "@/components/datetime-field"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -40,9 +41,10 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle }
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { Appointments as AppointmentsState } from "@/hooks/use-appointments"
 import { newId } from "@/lib/api"
-import { formatClock, formatClockRange, formatDay, fromLocalInput, HOUR, toLocalInput } from "@/lib/time"
+import { formatClock, formatClockRange, formatDay, HOUR } from "@/lib/time"
 import type { Appointment, Place } from "@/lib/types"
 
 /** The Sheet script refuses longer notes. */
@@ -101,9 +103,14 @@ export function Appointments({ state, user, demo }: { state: AppointmentsState; 
       </Button>
 
       {state.error && (
-        <button className="text-destructive flex items-center justify-center gap-1 text-xs" onClick={state.refresh}>
+        <Button
+          variant="link"
+          size="sm"
+          className="text-destructive h-auto text-xs whitespace-normal"
+          onClick={state.refresh}
+        >
           <RefreshCw className="size-3.5" /> {state.error}
-        </button>
+        </Button>
       )}
 
       {state.loading && state.appointments.length === 0 ? (
@@ -342,48 +349,47 @@ function AppointmentSheet({
                   />
                 </Field>
                 <div className="grid gap-3">
-                  <Field>
-                    <FieldLabel htmlFor="appt-start">Starts</FieldLabel>
-                    <Input
-                      id="appt-start"
-                      type="datetime-local"
-                      value={toLocalInput(appt.start)}
-                      onChange={(e) => setStart(fromLocalInput(e.target.value))}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="appt-end">Ends</FieldLabel>
-                    <Input
-                      id="appt-end"
-                      type="datetime-local"
-                      value={toLocalInput(appt.end)}
-                      onChange={(e) => set({ end: fromLocalInput(e.target.value) || undefined })}
-                    />
-                  </Field>
+                  <DateTimeField
+                    id="appt-start"
+                    label="Starts"
+                    value={appt.start}
+                    onChange={setStart}
+                    showNow={false}
+                  />
+                  <DateTimeField
+                    id="appt-end"
+                    label="Ends"
+                    value={appt.end ?? ""}
+                    onChange={(v) => set({ end: v || undefined })}
+                    clearable
+                    showNow={false}
+                  />
                 </div>
                 <Field>
                   <FieldLabel htmlFor="appt-location">Where</FieldLabel>
                   {places.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {places.map((p) => {
-                        const picked = appt.placeName === p.name && (appt.location ?? "") === p.address
-                        return (
-                          <Button
-                            key={p.id}
-                            type="button"
-                            size="sm"
-                            variant={picked ? "default" : "outline"}
-                            onClick={() =>
-                              picked
-                                ? set({ placeName: undefined, location: undefined })
-                                : set({ placeName: p.name, location: p.address || undefined })
-                            }
-                          >
-                            <MapPin /> {p.name}
-                          </Button>
+                    <ToggleGroup
+                      type="single"
+                      className="flex-wrap"
+                      aria-label="Saved places"
+                      value={
+                        places.find((p) => appt.placeName === p.name && (appt.location ?? "") === p.address)?.id ?? ""
+                      }
+                      onValueChange={(id) => {
+                        const p = places.find((p) => p.id === id)
+                        set(
+                          p
+                            ? { placeName: p.name, location: p.address || undefined }
+                            : { placeName: undefined, location: undefined },
                         )
-                      })}
-                    </div>
+                      }}
+                    >
+                      {places.map((p) => (
+                        <ToggleGroupItem key={p.id} value={p.id} className="h-8 flex-none px-3">
+                          <MapPin /> {p.name}
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
                   )}
                   <Input
                     id="appt-location"

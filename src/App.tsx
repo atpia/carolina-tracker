@@ -204,8 +204,10 @@ function Tracker({
             </span>
           )}
           {tracker.error && !tracker.loading && (
-            <button
-              className="text-destructive flex items-center gap-1"
+            <Button
+              variant="link"
+              size="sm"
+              className="text-destructive h-auto gap-1 px-0 text-xs"
               onClick={() => {
                 if (tracker.error?.kind === "server") toast.error(tracker.error.message)
                 tracker.refresh()
@@ -213,7 +215,7 @@ function Tracker({
             >
               <CloudOff className="size-3.5" />{" "}
               {tracker.error.kind === "network" ? "Offline, tap to retry" : "Sync problem, tap to retry"}
-            </button>
+            </Button>
           )}
           {tracker.user && (
             <span className="flex items-center gap-1">
