@@ -1,6 +1,5 @@
 import { Fragment, useEffect, useState } from "react"
 import { CircleCheck, CircleStop, Pencil, Plus, type LucideIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import type { Draft } from "@/components/entry-sheet"
 import { eventDetails, eventTitle } from "@/components/describe"
@@ -23,6 +22,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
+import { toast } from "@/components/ui/toast"
 import { useNow } from "@/hooks/use-now"
 import { useTempUnit } from "@/hooks/use-temp-unit"
 import { newId } from "@/lib/api"
@@ -60,7 +60,7 @@ export function Dashboard({
   babyName: string
   unit: Unit
   onOpen: (draft: Draft) => void
-  onSave: (event: LogEvent) => Promise<void>
+  onSave: (event: LogEvent, options?: { quiet?: boolean }) => Promise<void>
   onRemove: (id: string) => Promise<void>
   /** Shown when the Sheet has a Home Assistant reading light set up. */
   light?: { onGet: () => Promise<LightState>; onSet: (light: LightState) => Promise<LightState> }
@@ -69,14 +69,20 @@ export function Dashboard({
 
   async function quickLog(partial: Pick<LogEvent, "type" | "kind" | "doseMg">, message: string) {
     const event: LogEvent = { id: newId(), start: new Date().toISOString(), by: user, ...partial }
-    try {
-      await onSave(event)
-      toast.success(message, {
-        action: { label: "Undo", onClick: () => onRemove(event.id) },
-      })
-    } catch {
-      // toast already shown
-    }
+    // Rejects when the save fails, so the button doesn't show a check.
+    await toast.promise(onSave(event, { quiet: true }), {
+      loading: "Saving…",
+      success: {
+        title: message,
+        // Replaces the "Saving…" line, which a plain-text loading message puts in the description.
+        description: undefined,
+        actionProps: {
+          children: "Undo",
+          onClick: () => onRemove(event.id).then(() => toast.add({ title: "Undone" })),
+        },
+      },
+      error: (e: Error) => ({ title: "Couldn't save", description: e.message }),
+    })
   }
 
   return (
@@ -282,7 +288,7 @@ function MedsDue({
                 <div className="text-lg font-semibold">{item.label}</div>
                 <div className="text-muted-foreground text-sm">{item.sub}</div>
               </div>
-              <PendingButton variant={i === 0 ? "default" : "outline"} icon={item.icon} onClick={item.log}>
+              <PendingButton variant={i === 0 ? "default" : "outline"} icon={item.icon} onClick={item.log} confirmFirst>
                 Took it
               </PendingButton>
             </div>
@@ -598,6 +604,8 @@ function MedCard({
           variant={ready ? "default" : "secondary"}
           icon={NextIcon}
           onClick={() => take(nextMedKind)}
+          // A dose that's too soon asks first, so it shows no check yet.
+          confirmFirst={!tooSoon(nextMedKind)}
         >
           Took {MED_LABELS[nextMedKind]} now
         </PendingButton>
@@ -607,6 +615,7 @@ function MedCard({
           className="text-muted-foreground"
           icon={OtherIcon}
           onClick={() => take(other)}
+          confirmFirst={!tooSoon(other)}
         >
           Took {MED_LABELS[other]} instead
         </PendingButton>
@@ -685,7 +694,7 @@ function DailyRow({
         </div>
         <div className="text-muted-foreground text-xs">{hint}</div>
       </div>
-      <PendingButton variant="outline" size="sm" icon={Icon} onClick={onTake}>
+      <PendingButton variant="outline" size="sm" icon={Icon} onClick={onTake} confirmFirst>
         Took it
       </PendingButton>
     </div>

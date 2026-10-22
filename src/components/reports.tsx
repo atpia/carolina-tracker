@@ -3,7 +3,7 @@ import { format } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
 import { CalendarRange, ClipboardCopy, Droplets } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 
 import { eventDetails, eventTitle } from "@/components/describe"
 import { EventIcon } from "@/components/event-icon"
@@ -102,12 +102,13 @@ export function Reports({
 
   async function copySummary() {
     const text = summaryText(babyName, range, a, unit, tempUnit)
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success("Summary copied. Paste it into a message or note for the doctor.")
-    } catch {
-      toast.error("Couldn't copy on this device.")
-    }
+    await toast
+      .promise(navigator.clipboard.writeText(text), {
+        loading: "Copying…",
+        success: { title: "Summary copied", description: "Paste it into a message or note for the doctor." },
+        error: "Couldn't copy on this device",
+      })
+      .catch(() => {})
   }
 
   // Stats for older dates would be partial until those days arrive.
