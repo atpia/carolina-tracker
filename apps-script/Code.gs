@@ -16,7 +16,7 @@ var DEFAULT_SETTINGS = [
   ['babyName', 'Carolina', 'Shown at the top of the app'],
   ['feedMinH', 2, 'Hours after a feeding ends when the next window opens'],
   ['feedMaxH', 4, 'Hours after a feeding ends when the next one is due'],
-  ['breastLimitMin', 15, 'Minutes per breast before a running breastfeeding timer flashes, Discord is told and the Home Assistant light flashes (0 turns it off)'],
+  ['breastLimitMin', 15, 'Minutes per breast before a running breastfeeding timer flashes, a reminder goes out and the Home Assistant light flashes (0 turns it off)'],
   ['medIntervalH', 4, "Hours between mom's doses (alternating ibuprofen and Tylenol)"],
   ['diaperAfterChangeH', 2, 'Hours until the next diaper check after a wet or stool diaper'],
   ['diaperAfterCleanH', 1, 'Hours until the next check after one that found the diaper clean'],
@@ -25,11 +25,11 @@ var DEFAULT_SETTINGS = [
   ['appUrl', 'https://atpia.github.io/carolina-tracker/', 'Where the app is hosted, used for setup links'],
   ['apiUrl', '', 'Web app URL from Deploy → Manage deployments (ends in /exec), used for setup links'],
   ['discordWebhook', '', 'Discord channel webhook URL for reminders (leave blank for none)'],
-  ['remindFeeding', true, 'Discord alert when the feeding window opens and when it is overdue'],
-  ['remindDiaper', true, 'Discord alert when a diaper check is due'],
-  ['remindMeds', true, "Discord alert when mom's next dose is due"],
-  ['probioticReminderHour', 20, "Hour of the day (0-23, so 20 is 8 PM) for a Discord nudge if mom's probiotics are not logged yet that day. Type off for none"],
-  ['vitaminDReminderHour', 20, "Hour of the day (0-23) for a Discord nudge if the baby's Vitamin D is not logged yet that day. Type off for none"],
+  ['remindFeeding', true, 'Reminder (Discord and phone notifications) when the feeding window opens and when it is overdue'],
+  ['remindDiaper', true, 'Reminder when a diaper check is due'],
+  ['remindMeds', true, "Reminder when mom's next dose is due"],
+  ['probioticReminderHour', 20, "Hour of the day (0-23, so 20 is 8 PM) for a nudge if mom's probiotics are not logged yet that day. Type off for none"],
+  ['vitaminDReminderHour', 20, "Hour of the day (0-23) for a nudge if the baby's Vitamin D is not logged yet that day. Type off for none"],
   ['announceEntries', false, 'Also post every new entry to Discord'],
   ['haUrl', '', 'Your Home Assistant address (https://….ui.nabu.casa) for the reading light in the app. Its access token goes in with Baby tracker → Save Home Assistant token, not here'],
   ['readingLight', 'light.living_room_reading_light', 'Home Assistant entity ID of the light the app can switch and dim'],
@@ -112,9 +112,10 @@ function onOpen() {
     .createMenu('Baby tracker')
     .addItem('1. Set up tabs and codes', 'setup')
     .addItem('2. Refresh setup links', 'refreshSetupLinks')
-    .addItem('3. Turn on reminders (Discord and Home Assistant)', 'enableReminders')
+    .addItem('3. Turn on reminders (phones, Discord and Home Assistant)', 'enableReminders')
     .addItem('4. Set up appointments calendar', 'setupCalendar')
     .addSeparator()
+    .addItem('Send a test notification to phones', 'testPush')
     .addItem('Send a test Discord message', 'testDiscord')
     .addItem('Send a test Home Assistant alert', 'testLight')
     .addItem('Save Home Assistant token', 'saveHaToken')
@@ -220,6 +221,14 @@ function handle_(req, user) {
       return withLock_(function () { return savePlace_(req.place, user); });
     case 'deletePlace':
       return withLock_(function () { return deletePlace_(req.id); });
+    case 'pushKey':
+      return pushKey_();
+    case 'pushSubscribe':
+      return pushSubscribe_(req.subscription, user);
+    case 'pushUnsubscribe':
+      return pushUnsubscribe_(String(req.endpoint || ''));
+    case 'pushTest':
+      return pushTest_(String(req.endpoint || ''), user);
     default:
       throw new Error('Unknown action');
   }
@@ -519,8 +528,8 @@ function testDiscord() {
 
 function enableReminders() {
   var s = settingsWithDefaults_();
-  if (!String(s.discordWebhook || '').trim() && !String(s.haWebhookUrl || '').trim()) {
-    toast_('Paste a Discord webhook URL into Settings → discordWebhook or a Home Assistant one into haWebhookUrl first, then turn reminders on.');
+  if (!String(s.discordWebhook || '').trim() && !String(s.haWebhookUrl || '').trim() && !pushSubs_().length) {
+    toast_('Turn on notifications in the app (Settings → Notifications), or paste a Discord webhook URL into Settings → discordWebhook or a Home Assistant one into haWebhookUrl, then turn reminders on.');
     return;
   }
   disableReminders();
@@ -555,7 +564,9 @@ var STALE_TIMER_H = 3;
 function checkReminders() {
   var s = settingsWithDefaults_();
   var light = !!String(s.haWebhookUrl || '').trim();
-  if (!String(s.discordWebhook || '').trim() && !light) return;
+  var discord = !!String(s.discordWebhook || '').trim();
+  var phones = pushSubs_().length > 0;
+  if (!discord && !light && !phones) return;
   var H = 3600000;
   var now = Date.now();
   var events = listEvents_(3);
@@ -581,7 +592,7 @@ function checkReminders() {
     // Skip anything more than 6 hours stale, e.g. right after reminders are first turned on.
     if (now < due || now - due > 6 * H || sent.indexOf(key) >= 0) return;
     sent.push(key);
-    messages.push(message);
+    messages.push({ key: key, text: message });
   }
 
   if (truthy_(s.remindFeeding)) {
@@ -650,9 +661,545 @@ function checkReminders() {
     if (!taken) once(daily.kind + ':' + today, now, daily.message);
   });
 
-  if (messages.length && postDiscord_(messages.join('\n'), s)) {
-    props.setProperty('sentReminders', JSON.stringify(sent.slice(-100)));
+  if (!messages.length) return;
+  var delivered = false;
+  if (discord) {
+    try {
+      delivered = postDiscord_(messages.map(function (m) { return m.text; }).join('\n'), s);
+    } catch (err) {
+      Logger.log(err);
+    }
   }
+  if (phones) {
+    // One notification each, so a new feeding reminder replaces the last one instead of piling up.
+    messages.forEach(function (m) {
+      var tag = PUSH_TAGS[m.key.split(':')[0]] || 'reminder';
+      if (pushAll_(plain_(m.text, now), tag, messages.length, s)) delivered = true;
+    });
+  }
+  // Anything that reached nobody is tried again at the next check.
+  if (delivered) props.setProperty('sentReminders', JSON.stringify(sent.slice(-100)));
+}
+
+/** Which notification a reminder replaces on the phone. */
+var PUSH_TAGS = {
+  feedstale: 'feed-timer', feedswitch: 'feed-timer', feedlimit: 'feed-timer',
+  feedopen: 'feeding', feeddue: 'feeding',
+  diaper: 'diaper', med: 'med', probiotic: 'probiotic', vitamind: 'vitamind',
+};
+
+// ---------------------------------------------------------------------------
+// Phone notifications (Web Push)
+//
+// Each phone that turns on notifications in the app hands the Sheet a push address at Google (Android) or
+// Apple (iPhone). Sending to it is free and needs no account, but the message must be encrypted for that phone
+// (RFC 8291) and signed with this script's own key (VAPID, RFC 8292). Apps Script has no ECDSA, ECDH or AES,
+// so that math is done below in plain JavaScript with BigInt.
+
+/** How long a push service keeps trying a phone that's off. A reminder older than this isn't worth showing. */
+var PUSH_TTL_S = 3600;
+
+function pushSubs_() {
+  return JSON.parse(PropertiesService.getScriptProperties().getProperty('pushSubs') || '[]');
+}
+
+function savePushSubs_(subs) {
+  PropertiesService.getScriptProperties().setProperty('pushSubs', JSON.stringify(subs));
+}
+
+/** The script's VAPID key pair, made the first time a phone asks for it. Kept in Script Properties, not the Sheet. */
+function vapidKeys_() {
+  var props = PropertiesService.getScriptProperties();
+  var saved = props.getProperty('vapidKeys');
+  if (saved) return JSON.parse(saved);
+  return withLock_(function () {
+    var again = props.getProperty('vapidKeys');
+    if (again) return JSON.parse(again);
+    var pair = ecKeyPair_();
+    var keys = { privateKey: b64url_(pair.d), publicKey: b64url_(pair.pub) };
+    props.setProperty('vapidKeys', JSON.stringify(keys));
+    return keys;
+  });
+}
+
+function pushKey_() {
+  return vapidKeys_().publicKey;
+}
+
+/** The app sends its push subscription (subscription.toJSON()) when notifications are turned on. */
+function pushSubscribe_(input, user) {
+  var sub = input || {};
+  var keys = sub.keys || {};
+  if (!/^https:\/\//.test(String(sub.endpoint || '')) || !keys.p256dh || !keys.auth) throw new Error('Missing push subscription');
+  if (String(sub.endpoint).length > 1000) throw new Error('Push address is too long');
+  // Fails early on a key that isn't a P-256 point, rather than at the first reminder.
+  ecPoint_(b64urlDecode_(keys.p256dh));
+  withLock_(function () {
+    var subs = pushSubs_().filter(function (s) { return s.endpoint !== sub.endpoint; });
+    subs.push({
+      endpoint: String(sub.endpoint),
+      p256dh: String(keys.p256dh),
+      auth: String(keys.auth),
+      user: user,
+      device: String(sub.device || '').slice(0, 60),
+      at: new Date().toISOString(),
+    });
+    // Script Properties hold 9 KB per value, about 20 phones. Old ones go first.
+    savePushSubs_(subs.slice(-20));
+  });
+  return { reminders: remindersOn_() };
+}
+
+function pushUnsubscribe_(endpoint) {
+  withLock_(function () {
+    savePushSubs_(pushSubs_().filter(function (s) { return s.endpoint !== endpoint; }));
+  });
+  return true;
+}
+
+/** The app's "Send a test" button, to this phone only. */
+function pushTest_(endpoint, user) {
+  var sub = pushSubs_().filter(function (s) { return s.endpoint === endpoint; })[0];
+  if (!sub) throw new Error('This phone is not signed up for notifications. Turn them off and on again.');
+  var s = settingsWithDefaults_();
+  var status = sendPush_(sub, pushPayload_(s, '👋 Notifications work, ' + user + '. Reminders will show up like this.', 'test'));
+  if (status === 404 || status === 410) dropPushSubs_([endpoint]);
+  if (status >= 300) throw new Error('The push service refused it (' + status + '). Turn notifications off and on again.');
+  return true;
+}
+
+/** Whether the 5-minute check is on, or null before the script has been allowed to look (menu item 3 asks). */
+function remindersOn_() {
+  try {
+    return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'checkReminders'; });
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Discord's text, readable on a lock screen: no **bold**, and Discord's <t:…> timestamps as clock times in the
+ * script's time zone (Project Settings in the Apps Script editor).
+ */
+function plain_(text, now) {
+  var tz = Session.getScriptTimeZone();
+  return String(text).replace(/\*\*/g, '').replace(/<t:(\d+):([a-zA-Z])>/g, function (_, secs, style) {
+    var ms = Number(secs) * 1000;
+    if (style !== 'R') return Utilities.formatDate(new Date(ms), tz, 'h:mm a');
+    var mins = Math.round((now - ms) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    var h = Math.round(mins / 6) / 10;
+    return h + (h === 1 ? ' hour ago' : ' hours ago');
+  });
+}
+
+/**
+ * A Declarative Web Push message (iOS 18.4 and later show it even if the app's code doesn't run). Every other
+ * phone hands it to the app's service worker, which shows the same notification.
+ */
+function pushPayload_(s, body, tag, badge) {
+  var notification = {
+    title: String(s.babyName),
+    body: body,
+    navigate: String(s.appUrl),
+    tag: tag,
+    lang: 'en-US',
+  };
+  if (badge) notification.app_badge = badge;
+  return JSON.stringify({ web_push: 8030, notification: notification });
+}
+
+/** Sends one message to every phone that turned notifications on. True if at least one took it. */
+function pushAll_(body, tag, badge, s) {
+  var subs = pushSubs_();
+  if (!subs.length) return false;
+  var payload = pushPayload_(s, body, tag, badge);
+  var ok = false;
+  var gone = [];
+  subs.forEach(function (sub) {
+    var status = 0;
+    try {
+      status = sendPush_(sub, payload);
+    } catch (err) {
+      Logger.log(err);
+    }
+    // The phone turned notifications off, or the app was removed from it.
+    if (status === 404 || status === 410) gone.push(sub.endpoint);
+    if (status >= 200 && status < 300) ok = true;
+  });
+  if (gone.length) dropPushSubs_(gone);
+  return ok;
+}
+
+function dropPushSubs_(endpoints) {
+  withLock_(function () {
+    savePushSubs_(pushSubs_().filter(function (s) { return endpoints.indexOf(s.endpoint) < 0; }));
+  });
+}
+
+/** VAPID tokens for this run, by push service, so several phones on one service share a signature. */
+var vapidCache_ = {};
+
+function sendPush_(sub, payload) {
+  var keys = vapidKeys_();
+  var aud = String(sub.endpoint).match(/^https:\/\/[^/]+/)[0];
+  if (!vapidCache_[aud]) {
+    // Apple wants a URL or mailto: for sub. The app's address needs no extra permission to read.
+    var claims = { aud: aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: String(settingsWithDefaults_().appUrl) };
+    vapidCache_[aud] = vapidJwt_(claims, b64urlDecode_(keys.privateKey));
+  }
+  var body = encryptPush_(utf8_(payload), b64urlDecode_(sub.p256dh), b64urlDecode_(sub.auth));
+  var res = UrlFetchApp.fetch(sub.endpoint, {
+    method: 'post',
+    payload: Utilities.newBlob(signed_(body), 'application/octet-stream'),
+    headers: {
+      TTL: String(PUSH_TTL_S),
+      Urgency: 'high',
+      'Content-Encoding': 'aes128gcm',
+      Authorization: 'vapid t=' + vapidCache_[aud] + ', k=' + keys.publicKey,
+    },
+    muteHttpExceptions: true,
+  });
+  var code = res.getResponseCode();
+  if (code >= 300) Logger.log('Push to ' + aud + ' answered ' + code + ': ' + res.getContentText());
+  return code;
+}
+
+/** Menu item. Sends a test notification to every phone that turned notifications on. */
+function testPush() {
+  var subs = pushSubs_();
+  if (!subs.length) {
+    toast_('No phones have notifications on yet. Turn them on in the app under Settings → Notifications.');
+    return;
+  }
+  var ok = pushAll_('👋 Test from the Sheet. Reminders will show up like this.', 'test', 0, settingsWithDefaults_());
+  var left = pushSubs_();
+  toast_(ok
+    ? 'Sent to ' + left.length + (left.length === 1 ? ' phone: ' : ' phones: ') + left.map(function (s) { return s.user + (s.device ? ' (' + s.device + ')' : ''); }).join(', ')
+    : 'No phone accepted it. See Executions in the Apps Script editor for details.');
+}
+
+// --- Bytes. Arrays of numbers 0-255; Apps Script's own byte arrays are signed (-128 to 127).
+
+function unsigned_(bytes) {
+  return Array.prototype.map.call(bytes, function (b) { return b & 255; });
+}
+
+function signed_(bytes) {
+  return bytes.map(function (b) { return b > 127 ? b - 256 : b; });
+}
+
+function utf8_(text) {
+  return unsigned_(Utilities.newBlob(text).getBytes());
+}
+
+function b64url_(bytes) {
+  return Utilities.base64EncodeWebSafe(signed_(bytes)).replace(/=+$/, '');
+}
+
+function b64urlDecode_(text) {
+  var s = String(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  while (s.length % 4) s += '=';
+  return unsigned_(Utilities.base64DecodeWebSafe(s));
+}
+
+function hmac_(key, data) {
+  return unsigned_(Utilities.computeHmacSha256Signature(signed_(data), signed_(key)));
+}
+
+function sha256_(data) {
+  return unsigned_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, signed_(data)));
+}
+
+/** HKDF-SHA-256 (RFC 5869) for up to 32 bytes of output. */
+function hkdf_(salt, ikm, info, length) {
+  return hmac_(hmac_(salt, ikm), info.concat([1])).slice(0, length);
+}
+
+/** Apps Script has no secure random API, but its UUIDs come from one. Hashed so each byte is uniform. */
+function randomBytes_(n) {
+  var out = [];
+  while (out.length < n) out = out.concat(sha256_(utf8_(Utilities.getUuid() + Utilities.getUuid() + Date.now())));
+  return out.slice(0, n);
+}
+
+function bytesToInt_(bytes) {
+  var hex = bytes.map(function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+  return BigInt('0x' + (hex || '0'));
+}
+
+function intToBytes_(n, length) {
+  var hex = n.toString(16);
+  while (hex.length < length * 2) hex = '0' + hex;
+  var out = [];
+  for (var i = 0; i < length * 2; i += 2) out.push(parseInt(hex.slice(i, i + 2), 16));
+  return out;
+}
+
+// --- P-256. Made on first use, so a runtime without BigInt only breaks notifications, not the whole script.
+
+var curveCache_ = null;
+
+function curve_() {
+  if (!curveCache_) {
+    curveCache_ = {
+      p: BigInt('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff'),
+      n: BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551'),
+      b: BigInt('0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b'),
+      g: {
+        x: BigInt('0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296'),
+        y: BigInt('0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5'),
+      },
+    };
+  }
+  return curveCache_;
+}
+
+function mod_(a, m) {
+  var r = a % m;
+  return r < BigInt(0) ? r + m : r;
+}
+
+function inv_(a, m) {
+  // Extended Euclid.
+  var r0 = mod_(a, m), r1 = m, s0 = BigInt(1), s1 = BigInt(0);
+  while (r1 !== BigInt(0)) {
+    var q = r0 / r1;
+    var t = r0 - q * r1; r0 = r1; r1 = t;
+    t = s0 - q * s1; s0 = s1; s1 = t;
+  }
+  return mod_(s0, m);
+}
+
+/** Jacobian doubling for a = -3 (dbl-2001-b). Points are {x, y, z}; null is the point at infinity. */
+function ecDouble_(P) {
+  if (!P || P.y === BigInt(0)) return null;
+  var p = curve_().p;
+  var delta = P.z * P.z % p;
+  var gamma = P.y * P.y % p;
+  var beta = P.x * gamma % p;
+  var alpha = BigInt(3) * mod_(P.x - delta, p) * (P.x + delta) % p;
+  var x3 = mod_(alpha * alpha - BigInt(8) * beta, p);
+  var z3 = mod_((P.y + P.z) * (P.y + P.z) - gamma - delta, p);
+  var y3 = mod_(alpha * (BigInt(4) * beta - x3) - BigInt(8) * gamma * gamma, p);
+  return { x: x3, y: y3, z: z3 };
+}
+
+/** Adds an affine point Q to a Jacobian point P (madd-2007-bl). */
+function ecAddAffine_(P, Q) {
+  if (!P) return { x: Q.x, y: Q.y, z: BigInt(1) };
+  var p = curve_().p;
+  var z1z1 = P.z * P.z % p;
+  var u2 = Q.x * z1z1 % p;
+  var s2 = Q.y * P.z % p * z1z1 % p;
+  var h = mod_(u2 - P.x, p);
+  var r = mod_(BigInt(2) * (s2 - P.y), p);
+  if (h === BigInt(0)) return r === BigInt(0) ? ecDouble_(P) : null;
+  var hh = h * h % p;
+  var i = BigInt(4) * hh % p;
+  var j = h * i % p;
+  var v = P.x * i % p;
+  var x3 = mod_(r * r - j - BigInt(2) * v, p);
+  var y3 = mod_(r * (v - x3) - BigInt(2) * P.y * j, p);
+  var z3 = mod_((P.z + h) * (P.z + h) - z1z1 - hh, p);
+  return { x: x3, y: y3, z: z3 };
+}
+
+/** k·Q for an affine point Q, returned affine. */
+function ecMul_(k, Q) {
+  var R = null;
+  var bits = k.toString(2);
+  for (var i = 0; i < bits.length; i++) {
+    R = ecDouble_(R);
+    if (bits[i] === '1') R = ecAddAffine_(R, Q);
+  }
+  if (!R) throw new Error('Point at infinity');
+  var p = curve_().p;
+  var zi = inv_(R.z, p);
+  var zi2 = zi * zi % p;
+  return { x: R.x * zi2 % p, y: R.y * zi2 % p * zi % p };
+}
+
+/** An uncompressed public key (0x04 || x || y), checked to be on the curve. */
+function ecPoint_(bytes) {
+  var c = curve_();
+  if (bytes.length !== 65 || bytes[0] !== 4) throw new Error('Not a P-256 public key');
+  var x = bytesToInt_(bytes.slice(1, 33));
+  var y = bytesToInt_(bytes.slice(33));
+  var rhs = mod_(x * x % c.p * x - BigInt(3) * x + c.b, c.p);
+  if (x >= c.p || y >= c.p || y * y % c.p !== rhs) throw new Error('Not a P-256 public key');
+  return { x: x, y: y };
+}
+
+function ecEncode_(P) {
+  return [4].concat(intToBytes_(P.x, 32), intToBytes_(P.y, 32));
+}
+
+function ecKeyPair_() {
+  var n = curve_().n;
+  var d;
+  do d = bytesToInt_(randomBytes_(32)); while (d === BigInt(0) || d >= n);
+  return { d: intToBytes_(d, 32), pub: ecEncode_(ecMul_(d, curve_().g)) };
+}
+
+/** ECDSA P-256 with SHA-256 and a deterministic nonce (RFC 6979). Returns r || s, as JWTs want it. */
+function ecdsaSign_(message, dBytes) {
+  var c = curve_();
+  var d = bytesToInt_(dBytes);
+  var h = sha256_(message);
+  var z = bytesToInt_(h);
+  var x = intToBytes_(d, 32);
+  var h1 = intToBytes_(mod_(z, c.n), 32);
+  var V = [], K = [];
+  for (var i = 0; i < 32; i++) { V.push(1); K.push(0); }
+  K = hmac_(K, V.concat([0], x, h1));
+  V = hmac_(K, V);
+  K = hmac_(K, V.concat([1], x, h1));
+  V = hmac_(K, V);
+  for (;;) {
+    V = hmac_(K, V);
+    var k = bytesToInt_(V);
+    if (k > BigInt(0) && k < c.n) {
+      var r = mod_(ecMul_(k, c.g).x, c.n);
+      var s = mod_(inv_(k, c.n) * (z + r * d), c.n);
+      if (r !== BigInt(0) && s !== BigInt(0)) return intToBytes_(r, 32).concat(intToBytes_(s, 32));
+    }
+    K = hmac_(K, V.concat([0]));
+    V = hmac_(K, V);
+  }
+}
+
+function vapidJwt_(claims, dBytes) {
+  var input = b64url_(utf8_(JSON.stringify({ typ: 'JWT', alg: 'ES256' }))) + '.' + b64url_(utf8_(JSON.stringify(claims)));
+  return input + '.' + b64url_(ecdsaSign_(utf8_(input), dBytes));
+}
+
+// --- AES-128-GCM, encryption only.
+
+var aes_ = null;
+
+function aesTables_() {
+  if (aes_) return aes_;
+  var sbox = [], exp = [], log = [];
+  for (var i = 0, x = 1; i < 256; i++) {
+    exp[i] = x;
+    log[x] = i;
+    x ^= (x << 1) ^ (x & 128 ? 0x11b : 0);
+  }
+  sbox[0] = 0x63;
+  for (i = 1; i < 256; i++) {
+    var inv = exp[255 - log[i]];
+    var s = inv;
+    for (var k = 0; k < 4; k++) {
+      inv = ((inv << 1) | (inv >> 7)) & 255;
+      s ^= inv;
+    }
+    sbox[i] = s ^ 0x63;
+  }
+  aes_ = { sbox: sbox };
+  return aes_;
+}
+
+function aesExpandKey_(key) {
+  var sbox = aesTables_().sbox;
+  var w = key.slice();
+  var rcon = 1;
+  for (var i = 16; i < 176; i += 4) {
+    var t = w.slice(i - 4, i);
+    if (i % 16 === 0) {
+      t = [sbox[t[1]] ^ rcon, sbox[t[2]], sbox[t[3]], sbox[t[0]]];
+      rcon = (rcon << 1) ^ (rcon & 128 ? 0x11b : 0);
+    }
+    for (var j = 0; j < 4; j++) w[i + j] = w[i - 16 + j] ^ t[j];
+  }
+  return w;
+}
+
+function xtime_(b) {
+  return ((b << 1) ^ (b & 128 ? 0x11b : 0)) & 255;
+}
+
+function aesBlock_(w, input) {
+  var sbox = aesTables_().sbox;
+  var s = [];
+  for (var i = 0; i < 16; i++) s[i] = input[i] ^ w[i];
+  for (var round = 1; round <= 10; round++) {
+    // SubBytes and ShiftRows. The state is column-major: byte r + 4c is row r of column c.
+    var t = [];
+    for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++) t[r + 4 * c] = sbox[s[r + 4 * ((c + r) % 4)]];
+    if (round < 10) {
+      for (c = 0; c < 4; c++) {
+        var a0 = t[4 * c], a1 = t[4 * c + 1], a2 = t[4 * c + 2], a3 = t[4 * c + 3];
+        var all = a0 ^ a1 ^ a2 ^ a3;
+        t[4 * c] = a0 ^ all ^ xtime_(a0 ^ a1);
+        t[4 * c + 1] = a1 ^ all ^ xtime_(a1 ^ a2);
+        t[4 * c + 2] = a2 ^ all ^ xtime_(a2 ^ a3);
+        t[4 * c + 3] = a3 ^ all ^ xtime_(a3 ^ a0);
+      }
+    }
+    for (i = 0; i < 16; i++) s[i] = t[i] ^ w[16 * round + i];
+  }
+  return s;
+}
+
+/** Multiplication in GCM's GF(2^128), on 16-byte blocks held as BigInt. */
+function gfMul_(x, y) {
+  var R = BigInt('0xe1') << BigInt(120);
+  var one = BigInt(1);
+  var z = BigInt(0);
+  var v = y;
+  for (var i = 127; i >= 0; i--) {
+    if ((x >> BigInt(i)) & one) z ^= v;
+    v = v & one ? (v >> one) ^ R : v >> one;
+  }
+  return z;
+}
+
+/** AES-128-GCM with a 12-byte nonce and no associated data. Returns ciphertext || 16-byte tag. */
+function aesGcm_(key, nonce, plaintext) {
+  var w = aesExpandKey_(key);
+  var zero = [];
+  for (var i = 0; i < 16; i++) zero.push(0);
+  var H = bytesToInt_(aesBlock_(w, zero));
+  var counter = 1;
+  function ctr() {
+    return nonce.concat([(counter >>> 24) & 255, (counter >>> 16) & 255, (counter >>> 8) & 255, counter & 255]);
+  }
+  var tagMask = aesBlock_(w, ctr());
+  var out = [];
+  var ghash = BigInt(0);
+  for (i = 0; i < plaintext.length; i += 16) {
+    counter++;
+    var ks = aesBlock_(w, ctr());
+    var chunk = plaintext.slice(i, i + 16).map(function (b, j) { return b ^ ks[j]; });
+    out = out.concat(chunk);
+    var padded = chunk.concat(zero).slice(0, 16);
+    ghash = gfMul_(ghash ^ bytesToInt_(padded), H);
+  }
+  var lengths = intToBytes_(BigInt(0), 8).concat(intToBytes_(BigInt(plaintext.length * 8), 8));
+  ghash = gfMul_(ghash ^ bytesToInt_(lengths), H);
+  var tag = intToBytes_(ghash, 16).map(function (b, j) { return b ^ tagMask[j]; });
+  return out.concat(tag);
+}
+
+/**
+ * Encrypts a push message for one phone (RFC 8291, aes128gcm). `seed` is only for tests: a fixed
+ * { d, salt } in place of the fresh key pair and salt each message gets.
+ */
+function encryptPush_(plaintext, uaPublic, authSecret, seed) {
+  var ua = ecPoint_(uaPublic);
+  var local = seed ? { d: seed.d, pub: ecEncode_(ecMul_(bytesToInt_(seed.d), curve_().g)) } : ecKeyPair_();
+  var salt = seed ? seed.salt : randomBytes_(16);
+  var shared = intToBytes_(ecMul_(bytesToInt_(local.d), ua).x, 32);
+  var ikm = hkdf_(authSecret, shared, utf8_('WebPush: info').concat([0], uaPublic, local.pub), 32);
+  var cek = hkdf_(salt, ikm, utf8_('Content-Encoding: aes128gcm').concat([0]), 16);
+  var nonce = hkdf_(salt, ikm, utf8_('Content-Encoding: nonce').concat([0]), 12);
+  var rs = 4096;
+  if (plaintext.length + 17 > rs) throw new Error('Push message is too long');
+  // 0x02 marks the last (and only) record.
+  var header = salt.concat([0, 0, rs >> 8, rs & 255, local.pub.length], local.pub);
+  return header.concat(aesGcm_(cek, nonce, plaintext.concat([2])));
 }
 
 // ---------------------------------------------------------------------------

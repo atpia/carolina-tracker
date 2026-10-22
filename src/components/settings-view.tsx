@@ -14,9 +14,11 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { HomeScreenCard } from "@/components/home-screen-card"
 import { Field, FieldDescription, FieldGroup, FieldTitle } from "@/components/ui/field"
 import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import type { Backend } from "@/lib/api"
 import type { Settings } from "@/lib/types"
 import { setTempUnit, useTempUnit } from "@/hooks/use-temp-unit"
 import type { TempUnit } from "@/lib/temperature"
@@ -35,6 +37,8 @@ export function SettingsView({
   onTheme,
   onSignOut,
   queued = 0,
+  backend,
+  owner,
 }: {
   user: string
   users: string[]
@@ -47,6 +51,9 @@ export function SettingsView({
   onSignOut: () => void
   /** Entries on this phone that haven't reached the Sheet yet. */
   queued?: number
+  backend: Backend
+  /** The personal code this phone signed in with. */
+  owner: string
 }) {
   const tempUnit = useTempUnit()
   const unsynced = queued === 1 ? "1 entry on this phone hasn't" : `${queued} entries on this phone haven't`
@@ -122,6 +129,8 @@ export function SettingsView({
           </FieldGroup>
         </CardContent>
       </Card>
+
+      <HomeScreenCard backend={backend} owner={owner} demo={demo} />
 
       <Card>
         <CardHeader>

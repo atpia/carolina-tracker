@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { consumedMl, deriveStatus } from "./derive"
+import { consumedMl, deriveStatus, dueCount } from "./derive"
 import { HOUR } from "./time"
 import { DEFAULT_SETTINGS, type LogEvent } from "./types"
 
@@ -178,5 +178,22 @@ describe("breastfeeding limit", () => {
     expect(off.activeFeeds[0].overAt).toBeUndefined()
     const bottle = deriveStatus([ev("feeding", "formula", 0.1)], DEFAULT_SETTINGS)
     expect(bottle.activeFeeds[0].overAt).toBeUndefined()
+  })
+})
+
+describe("home screen badge", () => {
+  it("counts an overdue feed, a due diaper check and an allowed dose", () => {
+    const events = [
+      ev("feeding", "left", 5, { end: ago(4.5) }),
+      ev("diaper", "wet", 3),
+      ev("med", "ibuprofen", 5),
+      // Once-a-day items never count.
+    ]
+    expect(dueCount(deriveStatus(events, DEFAULT_SETTINGS), NOW)).toBe(3)
+  })
+
+  it("is empty when nothing is due, and counts a forgotten timer", () => {
+    expect(dueCount(deriveStatus([ev("feeding", "left", 1, { end: ago(0.5) }), ev("diaper", "wet", 0.5)], DEFAULT_SETTINGS), NOW)).toBe(0)
+    expect(dueCount(deriveStatus([ev("feeding", "left", 3.5), ev("diaper", "wet", 0.5)], DEFAULT_SETTINGS), NOW)).toBe(1)
   })
 })

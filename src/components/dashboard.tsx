@@ -25,9 +25,9 @@ import { Separator } from "@/components/ui/separator"
 import { useNow } from "@/hooks/use-now"
 import { useTempUnit } from "@/hooks/use-temp-unit"
 import { newId } from "@/lib/api"
-import type { Status } from "@/lib/derive"
+import { MED_BANNER_WINDOW, type Status } from "@/lib/derive"
 import { formatTemp, isFever } from "@/lib/temperature"
-import { HOUR, formatClock, formatClockRange, formatDuration, formatTimer, relative } from "@/lib/time"
+import { formatClock, formatClockRange, formatDuration, formatTimer, relative } from "@/lib/time"
 import {
   MED_LABELS,
   TEMP_LABELS,
@@ -208,9 +208,6 @@ function ActiveFeed({
     </Card>
   )
 }
-
-/** Pain relievers stop nagging after a day without a dose, in case mom no longer needs them. */
-const MED_BANNER_WINDOW = 24 * HOUR
 
 /** One line in the "Due now" banner. */
 interface DueItem {

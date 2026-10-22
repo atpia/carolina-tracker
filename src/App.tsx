@@ -30,10 +30,12 @@ import { useAppointments } from "@/hooks/use-appointments"
 import { useLightAlert } from "@/hooks/use-light-alert"
 import { useLocalState } from "@/hooks/use-local-state"
 import { useNow } from "@/hooks/use-now"
+import { useAppBadge, usePushResync } from "@/hooks/use-push"
 import { useTracker } from "@/hooks/use-tracker"
-import { loadConnection, saveConnection, type Connection } from "@/lib/api"
+import { createBackend, loadConnection, saveConnection, type Connection } from "@/lib/api"
 import { clearAutoReload } from "@/lib/chunk"
-import { deriveStatus } from "@/lib/derive"
+import { deriveStatus, dueCount } from "@/lib/derive"
+import type { EventType } from "@/lib/types"
 import type { Unit } from "@/lib/units"
 
 // Reports pulls in the chart library, the bulk of the app's size, so it loads only when opened.
@@ -65,6 +67,27 @@ function connectionFromHash(): Connection | null {
   if (!api || !code) return null
   history.replaceState(null, "", window.location.pathname + window.location.search)
   return { api, code }
+}
+
+const SHORTCUT_TYPES: EventType[] = ["feeding", "diaper", "med", "temp"]
+
+/**
+ * The home screen icon's shortcuts (press and hold it on Android) open …/?log=feeding and so on, and a
+ * notification tap can open …/?tab=calendar. Read once, then dropped from the address so a reload doesn't repeat it.
+ */
+function launchAction(): { log?: EventType; tab?: string } {
+  const params = new URLSearchParams(window.location.search)
+  const log = params.get("log") as EventType | null
+  const tab = params.get("tab")
+  if (!log && !tab) return {}
+  params.delete("log")
+  params.delete("tab")
+  const rest = params.toString()
+  history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash)
+  return {
+    log: log && SHORTCUT_TYPES.includes(log) ? log : undefined,
+    tab: tab && ["now", "history", "reports", "calendar", "settings"].includes(tab) ? tab : undefined,
+  }
 }
 
 function useTheme(theme: Theme) {
@@ -121,9 +144,11 @@ function Tracker({
 }) {
   const tracker = useTracker(conn)
   const appointments = useAppointments(conn)
+  const backend = useMemo(() => createBackend(conn), [conn])
+  const [launch] = useState(launchAction)
   const [unit, setUnit] = useLocalState<Unit>("ct.unit", "ml")
   const [tab, setTab] = useLocalState("ct.tab", "now")
-  const [draft, setDraft] = useState<Draft | null>(null)
+  const [draft, setDraft] = useState<Draft | null>(() => (launch.log ? { type: launch.log } : null))
   const [reportRange, setReportRange] = useState<ReportRange>({ preset: "7d" })
   useWarmReports()
   // A one-minute tick keeps "today", forgotten timers and 24-hour med counts current even when no new data arrives.
@@ -133,6 +158,12 @@ function Tracker({
     [tracker.events, tracker.settings, minute],
   )
   useLightAlert(status.activeFeeds, tracker.settings.lightAlert, tracker.lightAlert)
+  useAppBadge(dueCount(status, minute))
+  usePushResync(backend, conn.api === "demo" ? null : conn.code)
+  useEffect(() => {
+    if (launch.log) setTab("now")
+    else if (launch.tab) setTab(launch.tab)
+  }, [launch, setTab])
 
   if (tracker.sessionError) {
     return (
@@ -257,6 +288,8 @@ function Tracker({
             onTheme={onTheme}
             onSignOut={onSignOut}
             queued={tracker.queued}
+            backend={backend}
+            owner={conn.code}
           />
         </TabsContent>
       </main>

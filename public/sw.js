@@ -38,3 +38,41 @@ self.addEventListener("fetch", (event) => {
       ),
   )
 })
+
+// Reminders from the Sheet. They're Declarative Web Push messages: iOS 18.4 and later can show one on its own,
+// but whenever this worker gets the push event it shows the notification itself, which takes the place of that.
+self.addEventListener("push", (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch {
+    data = { notification: { body: event.data ? event.data.text() : "" } }
+  }
+  const n = data.notification || {}
+  const shown = self.registration.showNotification(n.title || "Baby tracker", {
+    body: n.body || "",
+    // A newer reminder of the same kind replaces the older one, and still buzzes.
+    tag: n.tag,
+    renotify: !!n.tag,
+    lang: n.lang,
+    icon: "./icon-192.png",
+    // Android's status bar wants a white-on-transparent shape.
+    badge: "./badge-96.png",
+    data: { url: n.navigate || self.registration.scope },
+  })
+  const badge = n.app_badge && self.navigator.setAppBadge ? self.navigator.setAppBadge(Number(n.app_badge)) : null
+  event.waitUntil(Promise.all([shown, badge && badge.catch(() => {})]))
+})
+
+// A tap brings the app forward if it's open, or opens it.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close()
+  const url = new URL((event.notification.data && event.notification.data.url) || "./", self.registration.scope)
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((w) => w.url.startsWith(self.registration.scope))
+      if (open) return open.focus()
+      return self.clients.openWindow(url.href)
+    }),
+  )
+})
