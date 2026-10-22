@@ -5,7 +5,7 @@ This takes about 15 minutes, once. Everything here is free.
 You need:
 - A Google account to own the Sheet that stores the data.
 - This GitHub repo, which hosts the app at **https://atpia.github.io/carolina-tracker/**.
-- Optionally, a Discord channel for reminders.
+- Optionally, a Discord channel for reminders. Reminders can also come to the phones as notifications (section 8).
 - Optionally, Home Assistant with Nabu Casa, to flash a light when a breastfeed runs long.
 
 ## 1. Create the Google Sheet
@@ -49,7 +49,9 @@ The home screen app keeps its own storage on iPhone, which is why the link gets 
 
 **Android (Chrome)**
 1. Open the personal setup link in Chrome. It connects right away.
-2. Tap **⋮ → Add to Home screen** (or **Install app**).
+2. Tap **Install app** under the app's **Settings → Home screen and notifications** (or **⋮ → Add to Home screen**).
+
+Once it's on the home screen it opens full screen, works offline and shows a number on its icon when a feed, diaper check or dose is due. On Android, press and hold the icon for shortcuts that go straight to logging a feeding, a diaper or medicine, or to the calendar.
 
 To remove someone's access, set their `active` cell to `FALSE` in the Users tab. Their phone shows "Couldn't sign in" the next time it syncs, and keeps any entries it hadn't synced yet in case the code works again. To give them a new code, type any new code in the `code` cell (letters, numbers and dashes) and run **Refresh setup links** again.
 
@@ -190,6 +192,32 @@ Nothing else is needed in Home Assistant: no automation for this one.
 
 Reload the app on each phone and the card appears on the **Now** tab. To take the light out of the app, run **Save Home Assistant token** again with an empty box. To cut off the token entirely, delete it in Home Assistant under **Security → Long-lived access tokens**.
 
+## 8. Notifications on the phones (optional)
+
+The reminders in section 4 can also arrive as ordinary phone notifications, from the Sheet, without Discord. Discord keeps working; use either or both. They go through Google's and Apple's free push services, which need no account or sign-up.
+
+Notifications on iPhone need iOS 16.4 or later and only work in the app opened from the home screen, not in a Safari tab.
+
+### In the Sheet
+
+1. Paste the latest [`apps-script/Code.gs`](apps-script/Code.gs) into the Apps Script editor (replace everything) and save.
+2. Deploy a new version: **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The phones need this to sign up.
+3. If reminders aren't on yet, click **Baby tracker → 3. Turn on reminders**. It now works with no Discord webhook, as long as a phone has turned notifications on.
+
+### On each phone
+
+1. Open the app from the home screen and go to **Settings → Home screen and notifications**.
+2. Tap **Turn on notifications** and allow them when the phone asks.
+3. Tap **Send a test**. A notification should arrive within a few seconds.
+
+Each person does this on their own phone. To check them all at once, click **Baby tracker → Send a test notification to phones** in the Sheet; it says which phones it reached.
+
+A tap on a notification opens the app. A newer reminder of the same kind (feeding, diaper, medicine) replaces the older one instead of stacking up. Reminders older than an hour are dropped rather than delivered late, for example to a phone that was off overnight.
+
+To stop them on one phone, tap **Turn off** in the same place, or turn notifications off for the app in the phone's settings. The Sheet forgets a phone by itself once its push address stops working.
+
+The Sheet keeps each phone's push address, and its own signing key, in the script's storage (Project Settings → Script Properties), not in a tab. If that key is ever deleted, each phone needs to turn notifications off and on again.
+
 ## Changing things later
 
 - **Intervals and the baby's name:** edit the Settings tab. The app picks up changes the next time it's opened.
@@ -202,4 +230,5 @@ Reload the app on each phone and the card appears on the **Now** tab. To take th
 - **GitHub Pages:** free for public repositories. The repo holds only code. No baby data or codes are ever stored in it.
 - **Google Apps Script (free Gmail account):** 90 minutes of trigger run time per day. The 5-minute reminder check takes about a second, which works out to roughly 5 minutes a day. App requests from the phones don't count against that limit.
 - **Google Calendar:** a free account can create about 5,000 calendar events a day, far more than appointments need.
+- **Phone notifications:** free. Google's and Apple's push services don't charge or need an account. Each reminder takes about a second of the 90 minutes, per phone.
 - **Discord webhooks:** free, with a limit of about 30 messages per minute per channel, far more than this uses.

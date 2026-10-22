@@ -14,6 +14,9 @@ const t = (iso: string) => new Date(iso).getTime()
 /** A feeding timer running this long was probably never stopped. */
 export const STALE_TIMER_MS = 3 * HOUR
 
+/** Pain relievers stop nagging after a day without a dose, in case mom no longer needs them. */
+export const MED_BANNER_WINDOW = 24 * HOUR
+
 /** How much of a bottle she actually drank, in ml. */
 export function consumedMl(e: LogEvent): number | undefined {
   if (!isBottle(e.kind) || e.amountStartMl === undefined) return undefined
@@ -127,3 +130,17 @@ export function deriveStatus(events: LogEvent[], settings: Settings, now = Date.
 }
 
 export type Status = ReturnType<typeof deriveStatus>
+
+/**
+ * How many things need someone now, for the number on the home screen icon: an overdue feeding, a forgotten
+ * timer, a diaper check and mom's next pain reliever. Once-a-day items stay off it so it isn't lit all day.
+ */
+export function dueCount(status: Status, now: number) {
+  const { feedRunning, feedBy, nextCheck, lastMed, nextMedAt, activeFeeds } = status
+  let n = 0
+  if (!feedRunning && feedBy !== undefined && now >= feedBy) n++
+  if (activeFeeds.some((a) => a.stale)) n++
+  if (nextCheck !== undefined && now >= nextCheck) n++
+  if (lastMed && nextMedAt !== undefined && now >= nextMedAt && now - t(lastMed.start) < MED_BANNER_WINDOW) n++
+  return n
+}

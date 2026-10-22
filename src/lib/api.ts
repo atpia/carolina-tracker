@@ -24,6 +24,13 @@ export interface Backend {
   listPlaces(): Promise<Place[]>
   savePlace(place: Place): Promise<Place>
   removePlace(id: string): Promise<void>
+  /** The Sheet's public VAPID key, which phones need to sign up for notifications. */
+  pushKey(): Promise<string>
+  /** Send this phone's push subscription to the Sheet. Says whether the Sheet's reminders are on. */
+  pushSubscribe(subscription: PushSubscriptionJSON & { device?: string }): Promise<{ reminders: boolean | null }>
+  pushUnsubscribe(endpoint: string): Promise<void>
+  /** Ask the Sheet to send a test notification to this phone. */
+  pushTest(endpoint: string): Promise<void>
 }
 
 /** A Sheet script from before appointments answers their actions with this. */
@@ -193,6 +200,18 @@ class RemoteBackend implements Backend {
   }
   async removePlace(id: string) {
     await this.call("deletePlace", { id })
+  }
+  pushKey() {
+    return this.call<string>("pushKey")
+  }
+  pushSubscribe(subscription: PushSubscriptionJSON & { device?: string }) {
+    return this.call<{ reminders: boolean | null }>("pushSubscribe", { subscription })
+  }
+  async pushUnsubscribe(endpoint: string) {
+    await this.call("pushUnsubscribe", { endpoint })
+  }
+  async pushTest(endpoint: string) {
+    await this.call("pushTest", { endpoint })
   }
 }
 
@@ -386,6 +405,15 @@ class DemoBackend implements Backend {
   async removePlace(id: string) {
     this.writePlaces(this.readPlaces().filter((p) => p.id !== id))
   }
+  // Notifications come from the Sheet, so the demo has none.
+  async pushKey(): Promise<string> {
+    throw new Error("Notifications need a Sheet. They aren't available in the demo.")
+  }
+  async pushSubscribe(): Promise<{ reminders: boolean | null }> {
+    throw new Error("Notifications need a Sheet. They aren't available in the demo.")
+  }
+  async pushUnsubscribe() {}
+  async pushTest() {}
 }
 
 export function createBackend(conn: Connection): Backend {

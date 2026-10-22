@@ -9,7 +9,8 @@ A small phone-friendly app for tracking a newborn's feedings and diapers, plus m
 - **Vitamin D:** the baby's daily drops, shown on the Feeding card and in the "Due now" banner until logged.
 - **Temperature:** log readings (rectal, armpit, forehead or ear) in °F or °C. Reports graph them against the 100.4 °F fever line.
 - **Shared:** each caregiver has a personal code, and every entry records who logged or last edited it.
-- **Discord reminders** (optional) when a feeding, diaper check or dose is due.
+- **Reminders** (optional) when a feeding, diaper check or dose is due, as phone notifications, in Discord, or both.
+- **Home screen app** for iPhone and Android: full screen, works offline, a badge on the icon when something is due, and Android shortcuts straight to logging.
 - **Home Assistant light** (optional) that flashes when a breastfeed passes the per-side limit, and a reading light switch with brightness in the app.
 
 Setup instructions are in [SETUP.md](SETUP.md). The Google Apps Script backend is in [`apps-script/Code.gs`](apps-script/Code.gs).
