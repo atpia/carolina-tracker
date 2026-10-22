@@ -125,8 +125,9 @@ export default function App() {
       ) : (
         <SetupScreen onConnect={connect} />
       )}
-      {/* Above the bottom tab bar. */}
-      <Toaster viewportClassName="bottom-[calc(5rem+env(safe-area-inset-bottom))] sm:bottom-[calc(5rem+env(safe-area-inset-bottom))]" />
+      {/* Above the bottom tab bar. Toasts travel their own height plus that gap, so they come in from and leave
+          past the bottom edge of the screen instead of vanishing over the tab bar. */}
+      <Toaster viewportClassName="bottom-[calc(5rem+env(safe-area-inset-bottom))] sm:bottom-[calc(5rem+env(safe-area-inset-bottom))] [--toast-travel:calc(100%+6rem+env(safe-area-inset-bottom))]" />
     </>
   )
 }

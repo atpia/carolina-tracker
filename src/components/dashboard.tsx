@@ -195,15 +195,14 @@ function ActiveFeed({
         <Button
           size="lg"
           variant={over ? "destructive" : "default"}
-          onClick={async () => {
+          onClick={() => {
             const done = { ...event, end: new Date().toISOString() }
-            try {
-              await onSave(done)
-              // Open the entry so they can add a confidence score or bottle amounts right away.
-              onOpen({ ...done, edit: true })
-            } catch {
-              // toast already shown
-            }
+            // Open the entry right away, so they can add a confidence score or bottle amounts while the stop
+            // saves in the background. The timer card goes at once too, since the save updates the list first.
+            // If the save fails, the tracker says so and the feed shows as running again; Save in the sheet
+            // retries it.
+            onOpen({ ...done, edit: true })
+            onSave(done).catch(() => {})
           }}
         >
           <CircleStop /> Stop
