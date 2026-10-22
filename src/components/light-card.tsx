@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Lamp, LampDesk } from "lucide-react"
+import { LampDesk } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import type { LightState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -90,15 +90,13 @@ export function LightCard({
         </CardDescription>
         <CardTitle className="text-2xl tabular-nums">{title}</CardTitle>
         <CardAction>
-          <Button
-            size="lg"
-            variant={light?.on ? "default" : "outline"}
+          <Switch
+            aria-label="Reading light"
+            checked={light?.on ?? false}
             disabled={disabled}
-            aria-pressed={light?.on ?? false}
-            onClick={() => light && send({ ...light, on: !light.on })}
-          >
-            <Lamp /> {light?.on ? "Turn off" : "Turn on"}
-          </Button>
+            onCheckedChange={(on) => light && send({ ...light, on })}
+            className="h-7 w-12 [&>span]:size-6"
+          />
         </CardAction>
       </CardHeader>
       <CardContent>

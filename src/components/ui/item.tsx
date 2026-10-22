@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Slot } from "radix-ui"
+import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
@@ -9,15 +10,38 @@ function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function Item({ className, asChild = false, ...props }: React.ComponentProps<"div"> & { asChild?: boolean }) {
+const itemVariants = cva(
+  "group/item flex w-full flex-wrap items-center rounded-md text-left text-sm outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 [a]:hover:bg-accent/50 [button]:hover:bg-accent/50 [button]:disabled:pointer-events-none",
+  {
+    variants: {
+      variant: {
+        default: "bg-transparent",
+        outline: "border",
+        muted: "bg-muted/50",
+      },
+      size: {
+        default: "gap-3 px-3 py-2.5",
+        sm: "gap-2 px-2 py-1",
+      },
+    },
+    defaultVariants: { variant: "default", size: "default" },
+  },
+)
+
+function Item({
+  className,
+  variant,
+  size,
+  asChild = false,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof itemVariants> & { asChild?: boolean }) {
   const Comp = asChild ? Slot.Root : "div"
   return (
     <Comp
       data-slot="item"
-      className={cn(
-        "group/item flex w-full flex-wrap items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 [a]:hover:bg-accent/50 [button]:hover:bg-accent/50",
-        className,
-      )}
+      data-variant={variant}
+      data-size={size}
+      className={cn(itemVariants({ variant, size }), className)}
       {...props}
     />
   )

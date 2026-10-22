@@ -20,6 +20,7 @@ import { PendingButton } from "@/components/pending-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import { useNow } from "@/hooks/use-now"
@@ -369,19 +370,22 @@ function FeedingCard({
             {!feedRunning && (
               <Progress value={progress} indicatorClassName={cn(progress >= 100 ? "bg-destructive" : "bg-feed")} />
             )}
-            <button
-              className="hover:bg-muted -mx-2 rounded-md px-2 py-1 text-left text-sm"
-              onClick={() => onOpen({ ...lastFeed, edit: true })}
-            >
-              {/* The window counts from the end, so show it when there is one. */}
-              <span className="font-medium">Last: {eventTitle(lastFeed)}</span>{" "}
-              {lastFeed.end
-                ? `${formatClockRange(lastFeed.start, lastFeed.end)} (ended ${relative(t(lastFeed.end), now)})`
-                : `at ${formatClock(lastFeed.start)} (${relative(t(lastFeed.start), now)})`}
-              <span className="text-muted-foreground block">
-                {[eventDetails(lastFeed, unit), `by ${lastFeed.by}`].filter(Boolean).join(" · ")}
-              </span>
-            </button>
+            <Item asChild size="sm" className="-mx-2 w-auto">
+              <button onClick={() => onOpen({ ...lastFeed, edit: true })}>
+                <ItemContent>
+                  {/* The window counts from the end, so show it when there is one. */}
+                  <ItemTitle className="block font-normal">
+                    <span className="font-medium">Last: {eventTitle(lastFeed)}</span>{" "}
+                    {lastFeed.end
+                      ? `${formatClockRange(lastFeed.start, lastFeed.end)} (ended ${relative(t(lastFeed.end), now)})`
+                      : `at ${formatClock(lastFeed.start)} (${relative(t(lastFeed.start), now)})`}
+                  </ItemTitle>
+                  <ItemDescription className="line-clamp-none">
+                    {[eventDetails(lastFeed, unit), `by ${lastFeed.by}`].filter(Boolean).join(" · ")}
+                  </ItemDescription>
+                </ItemContent>
+              </button>
+            </Item>
           </>
         )}
         <Button
@@ -474,13 +478,16 @@ function DiaperCard({
       </CardHeader>
       <CardContent className="grid gap-3">
         {lastChange && (
-          <button
-            className="hover:bg-muted -mx-2 rounded-md px-2 py-1 text-left text-sm"
-            onClick={() => onOpen({ ...lastChange, edit: true })}
-          >
-            <span className="font-medium">Last change: {eventTitle(lastChange)}</span> at{" "}
-            {formatClock(lastChange.start)} ({relative(t(lastChange.start), now)})
-          </button>
+          <Item asChild size="sm" className="-mx-2 w-auto">
+            <button onClick={() => onOpen({ ...lastChange, edit: true })}>
+              <ItemContent>
+                <ItemTitle className="block font-normal">
+                  <span className="font-medium">Last change: {eventTitle(lastChange)}</span> at{" "}
+                  {formatClock(lastChange.start)} ({relative(t(lastChange.start), now)})
+                </ItemTitle>
+              </ItemContent>
+            </button>
+          </Item>
         )}
         {(lastWet || lastStool) && (
           <p className="text-muted-foreground -mt-1 text-sm">
@@ -651,21 +658,24 @@ function DailyRow({
   const Icon = kindIcon("med", kind)
   if (taken)
     return (
-      <button
-        className="hover:bg-muted flex items-center gap-2 rounded-md px-1 py-1 text-left text-sm"
-        onClick={() => onOpen({ ...taken, edit: true })}
-      >
-        <CircleCheck className="text-med size-4 shrink-0" />
-        <span>
-          <span className="font-medium">
-            {label} {verb} today
-          </span>
-          <span className="text-muted-foreground">
-            {" "}
-            at {formatClock(taken.start)} by {taken.by}
-          </span>
-        </span>
-      </button>
+      <Item asChild size="sm" className="-mx-1 w-auto px-1">
+        <button onClick={() => onOpen({ ...taken, edit: true })}>
+          <ItemMedia>
+            <CircleCheck className="text-med size-4" />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle className="block font-normal">
+              <span className="font-medium">
+                {label} {verb} today
+              </span>
+              <span className="text-muted-foreground">
+                {" "}
+                at {formatClock(taken.start)} by {taken.by}
+              </span>
+            </ItemTitle>
+          </ItemContent>
+        </button>
+      </Item>
     )
   return (
     <div className="flex items-center justify-between gap-3">
@@ -738,15 +748,17 @@ function MedLast({
   const event = info.last
   const day = info.doses24h ? `${info.doses24h} in 24h${info.mg24h ? ` · ${info.mg24h.toLocaleString()} mg` : ""}` : ""
   return (
-    <button
-      className="bg-muted/60 hover:bg-muted rounded-md px-3 py-2 text-left disabled:pointer-events-none"
-      disabled={!event}
-      onClick={() => event && onOpen({ ...event, edit: true })}
-    >
-      <div className="text-foreground font-medium">{label}</div>
-      {event ? `${formatClock(event.start)} · ${relative(t(event.start), now)}` : "Not yet"}
-      {day && <div className="text-xs">{day}</div>}
-    </button>
+    <Item asChild variant="muted" className="hover:bg-muted items-start">
+      <button disabled={!event} onClick={() => event && onOpen({ ...event, edit: true })}>
+        <ItemContent className="gap-0">
+          <ItemTitle className="text-foreground">{label}</ItemTitle>
+          <ItemDescription>
+            {event ? `${formatClock(event.start)} · ${relative(t(event.start), now)}` : "Not yet"}
+          </ItemDescription>
+          {day && <ItemDescription className="text-xs">{day}</ItemDescription>}
+        </ItemContent>
+      </button>
+    </Item>
   )
 }
 
