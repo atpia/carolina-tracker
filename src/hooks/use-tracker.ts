@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 
 import { entryName } from "@/components/describe"
 import { createBackend, isAuthError, isNetworkError, isRetryable, type Connection } from "@/lib/api"
@@ -123,7 +123,7 @@ export function useTracker(conn: Connection) {
           // Signed out: keep it for when this code works again.
           if (onAuthError(e)) return
           const what = next.op === "save" ? entryName(next.event) : "a deleted entry"
-          toast.error(`Couldn't sync ${what}: ${(e as Error).message}`)
+          toast.add({ title: `Couldn't sync ${what}`, description: (e as Error).message, type: "error" })
         }
         mutations.current++
         setQueue(queue.current.filter((q) => q !== next))
@@ -192,7 +192,8 @@ export function useTracker(conn: Connection) {
   const ensureDays = useCallback((n: number) => setDays((d) => Math.max(d, Math.ceil(n))), [])
 
   const save = useCallback(
-    async (event: LogEvent) => {
+    /** quiet leaves telling about a failed save to the caller. */
+    async (event: LogEvent, { quiet = false }: { quiet?: boolean } = {}) => {
       let before: LogEvent | undefined
       setEvents((list) => {
         before = list.find((e) => e.id === event.id)
@@ -212,7 +213,11 @@ export function useTracker(conn: Connection) {
       } catch (e) {
         if (isRetryable(e)) {
           enqueue({ op: "save", event })
-          toast.info("Saved on this phone. It will sync when the connection is back.")
+          toast.add({
+            title: "Saved on this phone",
+            description: "It will sync when the connection is back.",
+            type: "info",
+          })
           return
         }
         if (isAuthError(e)) {
@@ -225,7 +230,7 @@ export function useTracker(conn: Connection) {
           const rest = list.filter((x) => x.id !== event.id)
           return before ? [...rest, before] : rest
         })
-        toast.error(`Couldn't save: ${(e as Error).message}`)
+        if (!quiet) toast.add({ title: "Couldn't save", description: (e as Error).message, type: "error" })
         throw e
       } finally {
         pending.current--
@@ -257,7 +262,7 @@ export function useTracker(conn: Connection) {
           return
         }
         setEvents((list) => (removed && !list.some((x) => x.id === id) ? [...list, removed] : list))
-        toast.error(`Couldn't delete: ${(e as Error).message}`)
+        toast.add({ title: "Couldn't delete", description: (e as Error).message, type: "error" })
       } finally {
         pending.current--
       }

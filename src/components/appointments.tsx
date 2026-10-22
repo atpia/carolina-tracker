@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 
 import {
   AlertDialog,
@@ -281,11 +281,17 @@ function AppointmentSheet({
     if (!appt || errors.length) return
     setBusy(true)
     try {
-      const saved = await onSave({ ...appt, title: appt.title.trim() })
-      if (saved.syncError) toast.warning(`Saved, but not added to Google Calendar: ${saved.syncError}`)
+      await toast.promise(onSave({ ...appt, title: appt.title.trim() }), {
+        loading: "Saving appointment…",
+        success: (saved) =>
+          saved.syncError
+            ? { title: "Saved, but not in Google Calendar yet", description: saved.syncError }
+            : "Appointment saved",
+        error: (e: Error) => ({ title: "Couldn't save", description: e.message }),
+      })
       onClose()
-    } catch (e) {
-      toast.error(`Couldn't save: ${(e as Error).message}`)
+    } catch {
+      // The toast shows what went wrong; the sheet stays open so nothing is lost.
     } finally {
       setBusy(false)
     }
@@ -300,7 +306,7 @@ function AppointmentSheet({
       set({ placeName: saved.name })
       setNewPlaceName(null)
     } catch (e) {
-      toast.error(`Couldn't save the place: ${(e as Error).message}`)
+      toast.add({ title: "Couldn't save the place", description: (e as Error).message, type: "error" })
     } finally {
       setSavingPlace(false)
     }
@@ -313,7 +319,7 @@ function AppointmentSheet({
       await onDelete(appt.id)
       onClose()
     } catch (e) {
-      toast.error(`Couldn't delete: ${(e as Error).message}`)
+      toast.add({ title: "Couldn't delete", description: (e as Error).message, type: "error" })
     } finally {
       setBusy(false)
     }
@@ -524,7 +530,7 @@ function PlaceSheet({
       await action()
       onClose()
     } catch (e) {
-      toast.error(`${failure}: ${(e as Error).message}`)
+      toast.add({ title: failure, description: (e as Error).message, type: "error" })
     } finally {
       setBusy(false)
     }

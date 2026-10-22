@@ -10,7 +10,6 @@ import {
   Settings as SettingsIcon,
   UserRound,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { Appointments } from "@/components/appointments"
 import { Dashboard } from "@/components/dashboard"
@@ -24,8 +23,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { Toaster } from "@/components/ui/sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { toast, Toaster } from "@/components/ui/toast"
 import { useAppointments } from "@/hooks/use-appointments"
 import { useLightAlert } from "@/hooks/use-light-alert"
 import { useLocalState } from "@/hooks/use-local-state"
@@ -126,7 +125,8 @@ export default function App() {
       ) : (
         <SetupScreen onConnect={connect} />
       )}
-      <Toaster position="top-center" richColors closeButton />
+      {/* Above the bottom tab bar. */}
+      <Toaster viewportClassName="bottom-[calc(5rem+env(safe-area-inset-bottom))] sm:bottom-[calc(5rem+env(safe-area-inset-bottom))]" />
     </>
   )
 }
@@ -209,7 +209,8 @@ function Tracker({
               size="sm"
               className="text-destructive h-auto gap-1 px-0 text-xs"
               onClick={() => {
-                if (tracker.error?.kind === "server") toast.error(tracker.error.message)
+                if (tracker.error?.kind === "server")
+                  toast.add({ title: "Sync problem", description: tracker.error.message, type: "error" })
                 tracker.refresh()
               }}
             >
