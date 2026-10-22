@@ -1,5 +1,15 @@
 import { Fragment, useMemo, useState } from "react"
-import { BookmarkPlus, CalendarCheck, CalendarClock, CalendarPlus, CalendarX, MapPin, Plus, RefreshCw, Trash2 } from "lucide-react"
+import {
+  BookmarkPlus,
+  CalendarCheck,
+  CalendarClock,
+  CalendarPlus,
+  CalendarX,
+  MapPin,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -57,15 +67,7 @@ function errorsFor(a: Appointment) {
   return out
 }
 
-export function Appointments({
-  state,
-  user,
-  demo,
-}: {
-  state: AppointmentsState
-  user: string
-  demo?: boolean
-}) {
+export function Appointments({ state, user, demo }: { state: AppointmentsState; user: string; demo?: boolean }) {
   const [draft, setDraft] = useState<{ appointment: Appointment; edit: boolean } | null>(null)
   const [showPast, setShowPast] = useState(false)
   const [placeDraft, setPlaceDraft] = useState<Place | null>(null)
@@ -553,9 +555,7 @@ function PlaceSheet({
                   placeholder="123 Main St, City"
                   maxLength={500}
                 />
-                {!isNew && (
-                  <FieldDescription>Changing it doesn't change appointments already saved.</FieldDescription>
-                )}
+                {!isNew && <FieldDescription>Changing it doesn't change appointments already saved.</FieldDescription>}
               </Field>
             </FieldGroup>
             <DrawerFooter>

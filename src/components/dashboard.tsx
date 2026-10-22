@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { PendingButton } from "@/components/pending-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -217,7 +218,7 @@ interface DueItem {
   label: string
   sub: string
   icon: LucideIcon
-  log: () => void
+  log: () => Promise<void>
 }
 
 /**
@@ -283,9 +284,9 @@ function MedsDue({
                 <div className="text-lg font-semibold">{item.label}</div>
                 <div className="text-muted-foreground text-sm">{item.sub}</div>
               </div>
-              <Button variant={i === 0 ? "default" : "outline"} onClick={item.log}>
-                <item.icon /> Took it
-              </Button>
+              <PendingButton variant={i === 0 ? "default" : "outline"} icon={item.icon} onClick={item.log}>
+                Took it
+              </PendingButton>
             </div>
           </Fragment>
         ))}
@@ -444,23 +445,12 @@ function DiaperCard({
   quickLog: (partial: Pick<LogEvent, "type" | "kind">, message: string) => Promise<void>
 }) {
   const { lastChange, lastCheck, lastWet, lastStool, nextCheck } = status
-  // The button just tapped stays disabled until its save finishes, so a double tap logs one diaper.
-  const [busy, setBusy] = useState<DiaperKind | null>(null)
   const due = nextCheck !== undefined && now >= nextCheck
   const headline = !nextCheck
     ? "No diaper checks yet"
     : due
       ? `Time to check ${babyName}'s diaper`
       : `Next check ${relative(nextCheck, now)}`
-
-  async function log(kind: DiaperKind, label: string) {
-    setBusy(kind)
-    try {
-      await quickLog({ type: "diaper", kind }, label)
-    } finally {
-      setBusy(null)
-    }
-  }
 
   return (
     <Card>
@@ -509,15 +499,15 @@ function DiaperCard({
           {DIAPER_BUTTONS.map(({ kind, label, toast }) => {
             const Icon = kindIcon("diaper", kind)
             return (
-              <Button
+              <PendingButton
                 key={kind}
                 size="lg"
                 variant={kind === "dry" ? "outline" : "secondary"}
-                disabled={busy === kind}
-                onClick={() => log(kind, toast)}
+                icon={Icon}
+                onClick={() => quickLog({ type: "diaper", kind }, toast)}
               >
-                <Icon /> {label}
-              </Button>
+                {label}
+              </PendingButton>
             )
           })}
         </div>
@@ -562,7 +552,7 @@ function MedCard({
   function take(kind: PainMedKind) {
     const reason = tooSoon(kind)
     if (reason) setConfirm({ kind, reason })
-    else log(kind)
+    else return log(kind)
   }
 
   return (
@@ -599,12 +589,23 @@ function MedCard({
             <MedLast key={kind} label={MED_LABELS[kind]} info={meds[kind]} now={now} onOpen={onOpen} />
           ))}
         </div>
-        <Button size="lg" variant={ready ? "default" : "secondary"} onClick={() => take(nextMedKind)}>
-          <NextIcon /> Took {MED_LABELS[nextMedKind]} now
-        </Button>
-        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => take(other)}>
-          <OtherIcon /> Took {MED_LABELS[other]} instead
-        </Button>
+        <PendingButton
+          size="lg"
+          variant={ready ? "default" : "secondary"}
+          icon={NextIcon}
+          onClick={() => take(nextMedKind)}
+        >
+          Took {MED_LABELS[nextMedKind]} now
+        </PendingButton>
+        <PendingButton
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          icon={OtherIcon}
+          onClick={() => take(other)}
+        >
+          Took {MED_LABELS[other]} instead
+        </PendingButton>
         <Separator />
         <DailyRow
           kind="probiotic"
@@ -648,7 +649,7 @@ function DailyRow({
   verb?: string
   taken?: LogEvent
   onOpen: (draft: Draft) => void
-  onTake: () => void
+  onTake: () => Promise<void>
 }) {
   const Icon = kindIcon("med", kind)
   if (taken)
@@ -677,9 +678,9 @@ function DailyRow({
         </div>
         <div className="text-muted-foreground text-xs">{hint}</div>
       </div>
-      <Button variant="outline" size="sm" onClick={onTake}>
-        <Icon /> Took it
-      </Button>
+      <PendingButton variant="outline" size="sm" icon={Icon} onClick={onTake}>
+        Took it
+      </PendingButton>
     </div>
   )
 }

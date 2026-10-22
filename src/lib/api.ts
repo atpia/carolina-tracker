@@ -253,8 +253,27 @@ function sampleAppointments(): Appointment[] {
     return d.toISOString()
   }
   return [
-    { id: "a0", title: "Newborn checkup", start: at(-3, 10), end: at(-3, 11), location: SAMPLE_PLACES[0].address, placeName: "Pediatric clinic", by: "Mom", synced: true },
-    { id: "a1", title: "Two-week checkup", start: at(4, 9), end: at(4, 10), location: SAMPLE_PLACES[0].address, placeName: "Pediatric clinic", notes: "Bring the feeding log", by: "Dad", synced: true },
+    {
+      id: "a0",
+      title: "Newborn checkup",
+      start: at(-3, 10),
+      end: at(-3, 11),
+      location: SAMPLE_PLACES[0].address,
+      placeName: "Pediatric clinic",
+      by: "Mom",
+      synced: true,
+    },
+    {
+      id: "a1",
+      title: "Two-week checkup",
+      start: at(4, 9),
+      end: at(4, 10),
+      location: SAMPLE_PLACES[0].address,
+      placeName: "Pediatric clinic",
+      notes: "Bring the feeding log",
+      by: "Dad",
+      synced: true,
+    },
     { id: "a2", title: "Lactation consultant", start: at(9, 14), by: "Mom", synced: true },
   ]
 }
