@@ -20,7 +20,8 @@ export function LightCard({
   onSet: (light: LightState) => Promise<LightState>
 }) {
   const [light, setLight] = useState<LightState | null>(null)
-  const [failed, setFailed] = useState(false)
+  // What the Sheet said when the last check failed, so a lost token reads differently from a dropped connection.
+  const [failed, setFailed] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   // The slider moves freely; only a finished drag goes to the light.
   const [dragging, setDragging] = useState<number | null>(null)
@@ -35,9 +36,9 @@ export function LightCard({
       if (sending.current) return
       confirmed.current = current
       setLight(current)
-      setFailed(false)
-    } catch {
-      setFailed(true)
+      setFailed(null)
+    } catch (e) {
+      setFailed((e as Error).message || "Couldn't reach the light.")
     }
   }, [onGet])
 
@@ -59,7 +60,7 @@ export function LightCard({
       const saved = await onSet(next)
       confirmed.current = saved
       setLight(saved)
-      setFailed(false)
+      setFailed(null)
     } catch (e) {
       setLight(confirmed.current)
       toast.add({ title: (e as Error).message || "Couldn't reach the light.", type: "error" })
@@ -89,6 +90,7 @@ export function LightCard({
           <LampDesk className="size-4" /> Reading light
         </CardDescription>
         <CardTitle className="text-2xl tabular-nums">{title}</CardTitle>
+        {failed && <p className="text-muted-foreground text-sm">{failed}</p>}
         <CardAction>
           <Switch
             aria-label="Reading light"
