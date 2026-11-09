@@ -25,6 +25,7 @@ var DEFAULT_SETTINGS = [
   ['appUrl', 'https://atpia.github.io/carolina-tracker/', 'Where the app is hosted, used for setup links'],
   ['apiUrl', '', 'Web app URL from Deploy → Manage deployments (ends in /exec), used for setup links'],
   ['discordWebhook', '', 'Discord channel webhook URL for reminders (leave blank for none)'],
+  ['discordOn', true, 'FALSE stops every Discord message (reminders and announceEntries) and keeps the webhook for later. The switch in the app, under Settings, changes this too'],
   ['remindFeeding', true, 'Reminder (Discord and phone notifications) when the feeding window opens and when it is overdue'],
   ['remindDiaper', true, 'Reminder when a diaper check is due'],
   ['remindMeds', true, "Reminder when mom's next dose is due"],
@@ -117,6 +118,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Send a test notification to phones', 'testPush')
     .addItem('Send a test Discord message', 'testDiscord')
+    .addItem('Turn Discord messages on or off', 'toggleDiscord')
     .addItem('Send a test Home Assistant alert', 'testLight')
     .addItem('Save Home Assistant token', 'saveHaToken')
     .addItem('Turn off reminders', 'turnOffReminders')
@@ -173,10 +175,30 @@ function doGet() {
   return ContentService.createTextOutput('The baby tracker API is running. Open the app link instead.');
 }
 
+/**
+ * The request: the app sends JSON in the body. A home screen widget (SETUP.md, section 9) sends a bare POST to a
+ * link with everything in it instead, …/exec?action=quick&code=…&do=diaper-wet, which arrives as e.parameter.
+ */
+function requestFrom_(e) {
+  var body = e && e.postData && e.postData.contents;
+  var req = null;
+  if (body) {
+    try {
+      req = JSON.parse(body);
+    } catch (err) {
+      req = null;
+    }
+  }
+  if ((!req || typeof req !== 'object' || !req.action) && e && e.parameter && e.parameter.action) req = e.parameter;
+  if (!req || typeof req !== 'object') throw new Error('The request was not understood.');
+  return req;
+}
+
 function doPost(e) {
   var out;
+  var req = {};
   try {
-    var req = JSON.parse(e.postData.contents);
+    req = requestFrom_(e);
     var user = authenticate_(req.code);
     out = { ok: true, result: handle_(req, user) };
   } catch (err) {
@@ -186,6 +208,11 @@ function doPost(e) {
     if ((err && err.retry) || isServiceError_(message)) out.retry = true;
     // The app signs this phone out and keeps its unsynced entries.
     if (err && err.auth) out.auth = true;
+  }
+  // Widgets show the answer as it comes, so they get a plain sentence instead of JSON.
+  if (req && req.format === 'text') {
+    var text = out.ok ? (out.result && out.result.message) || 'Done.' : "Couldn't do that: " + out.error;
+    return ContentService.createTextOutput(text);
   }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -200,9 +227,22 @@ function handle_(req, user) {
       var saved = withLock_(function () { return saveEvent_(req.event, user); });
       // Posting to Discord after the lock is released keeps a slow Discord from holding up other phones.
       if (saved.created) announce_(saved.event);
+      if (saved.event.type === 'feeding') feedChanged_(req.from, user, saved.event);
       return saved.event;
     case 'delete':
-      return withLock_(function () { return deleteEvent_(req.id, user); });
+      var deleted = withLock_(function () { return deleteEvent_(req.id, user); });
+      feedChanged_(req.from, user, null);
+      return deleted;
+    case 'stop':
+      var stopped = withLock_(function () { return stopFeed_(String(req.id || ''), req.end, user, req.event); });
+      feedChanged_(req.from, user, stopped);
+      return stopped;
+    case 'quick':
+      var quick = withLock_(function () { return quick_(String(req['do'] || ''), user, req); });
+      quick.created.forEach(announce_);
+      // A widget isn't any phone's app, so every phone hears about it, the one it was tapped on too.
+      if (quick.feed) feedChanged_(null, user, null);
+      return { message: quick.message };
     case 'lightAlert':
       return lightAlert_(req.id);
     case 'setLight':
@@ -221,6 +261,8 @@ function handle_(req, user) {
       return withLock_(function () { return savePlace_(req.place, user); });
     case 'deletePlace':
       return withLock_(function () { return deletePlace_(req.id); });
+    case 'setDiscord':
+      return setDiscord_(req.on === true);
     case 'pushKey':
       return pushKey_();
     case 'pushSubscribe':
@@ -288,6 +330,8 @@ function clientSettings_() {
     // Only whether it's set. The URL works like a password, so it stays in the Sheet.
     lightAlert: !!String(s.haWebhookUrl || '').trim(),
     lightControl: haReady_(s),
+    // The same goes for the Discord webhook: the app only learns whether there is one, and whether it's on.
+    discord: discordState_(s),
   };
 }
 
@@ -466,6 +510,228 @@ function deleteEvent_(id, user) {
   return true;
 }
 
+/**
+ * Stops a running feed. A feed someone already stopped keeps its finish time, so a Stop tapped on an old
+ * notification can't overwrite it. `fallback` is the whole entry, for a feed started offline that isn't here yet.
+ */
+function stopFeed_(id, end, user, fallback) {
+  var endMs = time_(end) || Date.now();
+  var row = findRow_(id);
+  if (!row) {
+    if (!fallback || fallback.type !== 'feeding') throw new Error('That feed is not in the Sheet.');
+    var input = {};
+    EDITABLE_FIELDS.forEach(function (f) { input[f] = fallback[f]; });
+    input.id = id;
+    input.end = new Date(Math.max(endMs, time_(fallback.start))).toISOString();
+    return saveEvent_(input, user).event;
+  }
+  var sheet = eventsSheet_();
+  var event = rowToEvent_(sheet.getRange(row, 1, 1, EVENT_HEADERS.length).getValues()[0]);
+  if (truthy_(event.deleted)) throw new Error('This feed was deleted on another phone.');
+  if (event.type !== 'feeding') throw new Error('That entry is not a feed.');
+  if (!event.end) {
+    event.end = new Date(Math.max(endMs, time_(event.start))).toISOString();
+    event.updatedAt = new Date().toISOString();
+    event.updatedBy = user;
+    sheet.getRange(row, 1, 1, EVENT_HEADERS.length).setValues([eventToRow_(event)]);
+  }
+  delete event.deleted;
+  return event;
+}
+
+// ---------------------------------------------------------------------------
+// One-tap actions for Siri and home screen widgets (SETUP.md, section 9) and the app's icon shortcuts
+
+var QUICK = {
+  'feed': { feed: 'toggle' },
+  'feed-stop': { feed: 'stop' },
+  'feed-left': { feed: 'left' },
+  'feed-right': { feed: 'right' },
+  'feed-both': { feed: 'both' },
+  'feed-formula': { feed: 'formula' },
+  'feed-expressed': { feed: 'expressed' },
+  'feed-details': { details: true },
+  'diaper-wet': { diaper: 'wet' },
+  'diaper-stool': { diaper: 'stool' },
+  'diaper-both': { diaper: 'both' },
+  'diaper-dry': { diaper: 'dry' },
+};
+
+var BOTTLES = { formula: true, expressed: true };
+var ML_PER_OZ = 29.5735;
+/** More than any one bottle holds, so a misheard "40" for "4" isn't saved as 40 oz. */
+var QUICK_MAX_ML = 500;
+
+/**
+ * What a one-tap action does, given recent entries. Matches planQuick() in the app's src/lib/quick.ts:
+ * - "feed" stops the running feed, or starts the side after the last single-side feed.
+ * - "feed-left" (right, both, formula, expressed) starts that feed. Only one feed runs at a time, so with one
+ *   going it answers "busy" instead, and the running one has to be stopped first.
+ * - "feed-stop" stops the running feed.
+ * - "feed-details" picks the feed that ended last, within the hour, to add how it went.
+ */
+function quickPlan_(what, events, now, user) {
+  var q = QUICK[what];
+  if (!q) throw new Error('Unknown quick action "' + what + '". Use one of: ' + Object.keys(QUICK).join(', ') + '.');
+  if (q.diaper) return { diaper: q.diaper };
+  if (q.details) return { details: lastEnded_(events, now, user) };
+  // A timer left on for hours isn't "running" here; the app asks for its real finish time instead.
+  var running = runningFeed_(events, now);
+  if (q.feed === 'stop') return { stop: running };
+  if (q.feed === 'toggle') {
+    if (running) return { stop: running };
+    var side = latest_(events, function (e) { return e.type === 'feeding' && (e.kind === 'left' || e.kind === 'right'); });
+    return { start: side && side.kind === 'left' ? 'right' : 'left' };
+  }
+  if (running) return { busy: running };
+  return { start: q.feed };
+}
+
+/** The newest feed timer that's going, not one left on for hours by mistake. Matches activeFeeds in the app. */
+function runningFeed_(events, now) {
+  return latest_(events, function (e) {
+    return e.type === 'feeding' && !e.end && now - time_(e.start) < STALE_TIMER_H * 3600000;
+  });
+}
+
+/** A feed timer that has run for hours: someone forgot to stop it. */
+function forgottenFeed_(events, now) {
+  return latest_(events, function (e) {
+    return e.type === 'feeding' && !e.end && now - time_(e.start) >= STALE_TIMER_H * 3600000;
+  });
+}
+
+/** The feed that ended last, in the past hour. One this person stopped comes first. */
+function lastEnded_(events, now, user) {
+  var recent = events.filter(function (e) {
+    return e.type === 'feeding' && e.end && now - time_(e.end) < 3600000;
+  });
+  var mine = recent.filter(function (e) { return (e.updatedBy || e.by) === user; });
+  var last = null;
+  (mine.length ? mine : recent).forEach(function (e) {
+    if (!last || time_(e.end) > time_(last.end)) last = e;
+  });
+  return last;
+}
+
+function clock_(ms) {
+  return Utilities.formatDate(new Date(ms), Session.getScriptTimeZone(), 'h:mm a');
+}
+
+/** A number from a shortcut: "3.5", "3,5" on a phone that writes decimals with a comma, or "75%". NaN if none. */
+function quickNumber_(v) {
+  return parseFloat(String(v === undefined || v === null ? '' : v).replace(',', '.'));
+}
+
+/** Rounded the way the app's fromDisplay() does, so the same amount reads the same everywhere. */
+function toMl_(value, unit) {
+  return unit === 'oz' ? Math.round(value * ML_PER_OZ * 10) / 10 : value;
+}
+
+function amountText_(ml, unit) {
+  return unit === 'oz' ? Math.round((ml / ML_PER_OZ) * 10) / 10 + ' oz' : Math.round(ml) + ' ml';
+}
+
+function aFeed_(e) {
+  var name = label_(e).toLowerCase();
+  return (/^[aeiou]/.test(name) ? 'An ' : 'A ') + name + ' feed';
+}
+
+/** What to ask after a feed stops, for Siri to read out, or '' if the feed has what it needs. */
+function detailsQuestion_(e, unit, baby) {
+  if (BOTTLES[e.kind]) {
+    if (!e.amountStartMl) return 'How much did ' + baby + ' drink, in ' + unit + '?';
+    if (e.percent === undefined && e.amountEndMl === undefined) return 'What percent did ' + baby + ' drink?';
+    return '';
+  }
+  return e.confidence === undefined ? 'How did it go, from 1 to 5?' : '';
+}
+
+/** Saves the answer to detailsQuestion_(): a 1 to 5 score for the breast, a percent or amount for a bottle. */
+function saveDetails_(feed, value, unit, user, baby) {
+  if (!feed) return 'No feed has ended in the last hour.';
+  var v = quickNumber_(value);
+  var change;
+  var said;
+  if (BOTTLES[feed.kind] && !feed.amountStartMl) {
+    if (!(v > 0 && toMl_(v, unit) <= QUICK_MAX_ML)) return "That amount doesn't look right. Add it in the app instead.";
+    // Stored the way the app stores a typed amount: a bottle of that size, finished.
+    change = { amountStartMl: toMl_(v, unit), amountEndMl: 0 };
+    said = baby + ' drank ' + amountText_(change.amountStartMl, unit) + '.';
+  } else if (BOTTLES[feed.kind]) {
+    if (!(v >= 0 && v <= 100)) return 'That needs a percent from 0 to 100. Add it in the app instead.';
+    change = { percent: Math.round(v) };
+    said = baby + ' drank ' + change.percent + '% of ' + amountText_(feed.amountStartMl, unit) + '.';
+  } else {
+    if (!(v >= 1 && v <= 5)) return 'That needs a number from 1 to 5. Add it in the app instead.';
+    change = { confidence: Math.round(v) };
+    said = label_(feed) + ' feed, ' + change.confidence + ' out of 5.';
+  }
+  var input = {};
+  Object.keys(feed).forEach(function (k) { input[k] = feed[k]; });
+  Object.keys(change).forEach(function (k) { input[k] = change[k]; });
+  saveEvent_(input, user);
+  return 'Saved. ' + said;
+}
+
+/**
+ * Runs a one-tap action and says what it did in a sentence, for Siri to read out or a widget to show. `params`
+ * are the link's other parts: `amount` for a bottle that's starting, `value` for feed-details, `unit` (ml or oz)
+ * for both, and `ask` to end a stopped feed's sentence with the question for feed-details.
+ */
+function quick_(what, user, params) {
+  params = params || {};
+  var now = Date.now();
+  var at = new Date(now).toISOString();
+  var events = listEvents_(2);
+  var plan = quickPlan_(what, events, now, user);
+  var unit = params.unit === 'oz' ? 'oz' : 'ml';
+  var baby = String(settingsWithDefaults_().babyName);
+  var created = [];
+  var said = [];
+  if (plan.diaper) {
+    var diaper = saveEvent_({ id: Utilities.getUuid(), type: 'diaper', kind: plan.diaper, start: at }, user).event;
+    created.push(diaper);
+    said.push(label_(diaper) + ' logged at ' + clock_(now) + '.');
+  }
+  if (plan.busy) {
+    var ago = Math.max(1, Math.round((now - time_(plan.busy.start)) / 60000));
+    said.push(aFeed_(plan.busy) + ' is already running, started at ' + clock_(time_(plan.busy.start)) + ' (' + ago +
+      ' min). Stop it before starting another.');
+  }
+  if (plan.stop) {
+    var stopped = stopFeed_(plan.stop.id, at, user);
+    var mins = Math.max(1, Math.round((time_(stopped.end) - time_(stopped.start)) / 60000));
+    said.push(label_(stopped) + ' feed stopped after ' + mins + ' min.');
+    var ask = String(params.ask) === '1' || String(params.ask) === 'true';
+    var question = ask ? detailsQuestion_(stopped, unit, baby) : '';
+    if (question) said.push(question);
+  }
+  if (plan.start) {
+    var input = { id: Utilities.getUuid(), type: 'feeding', kind: plan.start, start: at };
+    var amount = quickNumber_(params.amount);
+    if (BOTTLES[plan.start] && amount > 0) {
+      if (toMl_(amount, unit) > QUICK_MAX_ML) {
+        throw new Error(amountText_(toMl_(amount, unit), unit) + ' is more than a bottle holds. Try again, or use the app.');
+      }
+      input.amountStartMl = toMl_(amount, unit);
+    }
+    var feed = saveEvent_(input, user).event;
+    created.push(feed);
+    var offered = feed.amountStartMl ? ', ' + amountText_(feed.amountStartMl, unit) + ' offered' : '';
+    said.push(label_(feed) + ' feed started at ' + clock_(now) + offered + '.');
+    if (BOTTLES[plan.start] && !feed.amountStartMl) said.push('Add how much was offered in the app.');
+  }
+  if ('details' in plan) {
+    said.push(saveDetails_(plan.details, params.value, unit, user, baby));
+  } else if (!plan.diaper) {
+    if (!said.length) said.push('No feed is running.');
+    var forgotten = forgottenFeed_(events, now);
+    if (forgotten) said.push('A feed timer from ' + clock_(time_(forgotten.start)) + ' was never stopped. Set when it ended in the app.');
+  }
+  return { message: said.join(' '), created: created, feed: !!(plan.stop || plan.start) };
+}
+
 // ---------------------------------------------------------------------------
 // Discord
 
@@ -489,9 +755,38 @@ function ts_(ms, style) {
   return '<t:' + Math.floor(ms / 1000) + ':' + (style || 't') + '>';
 }
 
+/** The Discord webhook to post to, or '' when there's none or Discord is turned off (discordOn). */
+function discordWebhook_(s) {
+  return truthy_(s.discordOn) ? String(s.discordWebhook || '').trim() : '';
+}
+
+/** For the app: 'none' without a webhook, else whether Discord messages are on. */
+function discordState_(s) {
+  if (!String(s.discordWebhook || '').trim()) return 'none';
+  return truthy_(s.discordOn) ? 'on' : 'off';
+}
+
+/** The app's switch, and the menu's. Turns every Discord message on or off for everyone; the webhook stays. */
+function setDiscord_(on) {
+  withLock_(function () { setSetting_('discordOn', !!on); });
+  return { discord: discordState_(settingsWithDefaults_()) };
+}
+
+function toggleDiscord() {
+  var s = settingsWithDefaults_();
+  if (discordState_(s) === 'none') {
+    toast_('No Discord channel is set up. Paste a webhook URL into Settings → discordWebhook first.');
+    return;
+  }
+  var state = setDiscord_(!truthy_(s.discordOn)).discord;
+  toast_(state === 'on'
+    ? 'Discord messages are on.'
+    : 'Discord messages are off. Phone notifications keep working, and the webhook stays for when you turn them back on.');
+}
+
 function postDiscord_(content, settings) {
   var s = settings || settingsWithDefaults_();
-  var url = String(s.discordWebhook || '').trim();
+  var url = discordWebhook_(s);
   if (!url) return false;
   var res = UrlFetchApp.fetch(url, {
     method: 'post',
@@ -522,13 +817,18 @@ function truthy_(v) {
 }
 
 function testDiscord() {
-  var ok = postDiscord_('👋 The baby tracker can post here. Reminders will show up in this channel.');
+  var s = settingsWithDefaults_();
+  if (discordState_(s) === 'off') {
+    toast_('Discord messages are turned off. Turn them on with Baby tracker → Turn Discord messages on or off, or in the app.');
+    return;
+  }
+  var ok = postDiscord_('👋 The baby tracker can post here. Reminders will show up in this channel.', s);
   toast_(ok ? 'Sent! Check your Discord channel.' : 'Nothing sent. Paste the webhook URL into Settings → discordWebhook first.');
 }
 
 function enableReminders() {
   var s = settingsWithDefaults_();
-  if (!String(s.discordWebhook || '').trim() && !String(s.haWebhookUrl || '').trim() && !pushSubs_().length) {
+  if (!discordWebhook_(s) && !String(s.haWebhookUrl || '').trim() && !pushSubs_().length) {
     toast_('Turn on notifications in the app (Settings → Notifications), or paste a Discord webhook URL into Settings → discordWebhook or a Home Assistant one into haWebhookUrl, then turn reminders on.');
     return;
   }
@@ -564,9 +864,11 @@ var STALE_TIMER_H = 3;
 function checkReminders() {
   var s = settingsWithDefaults_();
   var light = !!String(s.haWebhookUrl || '').trim();
-  var discord = !!String(s.discordWebhook || '').trim();
+  var discord = !!discordWebhook_(s);
+  // Turned off in the app or the menu, as opposed to never set up.
+  var discordMuted = discordState_(s) === 'off';
   var phones = pushSubs_().length > 0;
-  if (!discord && !light && !phones) return;
+  if (!discord && !light && !phones && !discordMuted) return;
   var H = 3600000;
   var now = Date.now();
   var events = listEvents_(3);
@@ -662,7 +964,9 @@ function checkReminders() {
   });
 
   if (!messages.length) return;
-  var delivered = false;
+  // With Discord switched off and no phones, a reminder counts as handled, so turning Discord back on doesn't
+  // post hours-old ones.
+  var delivered = discordMuted && !phones;
   if (discord) {
     try {
       delivered = postDiscord_(messages.map(function (m) { return m.text; }).join('\n'), s);
@@ -742,6 +1046,8 @@ function pushSubscribe_(input, user) {
       auth: String(keys.auth),
       user: user,
       device: String(sub.device || '').slice(0, 60),
+      // Whether this phone shows the running feed (the app's Settings switch). On unless turned off there.
+      feed: sub.feed !== false,
       at: new Date().toISOString(),
     });
     // Script Properties hold 9 KB per value, about 20 phones. Old ones go first.
@@ -795,9 +1101,17 @@ function plain_(text, now) {
 }
 
 /**
- * A Declarative Web Push message (iOS 18.4 and later show it even if the app's code doesn't run). Every other
- * phone hands it to the app's service worker, which shows the same notification.
+ * A Declarative Web Push message: iOS 18.4 and later show it without running the app's code. `mutable` asks them
+ * to wake the app's service worker anyway, as every other phone does, so it can sync in the background and show
+ * its own version (the running feed's notice, say). Without it those iPhones never sync on a reminder.
+ * `extra` goes alongside for the service worker. Push API spec: https://w3c.github.io/push-api/
  */
+function pushMessage_(notification, extra) {
+  var message = { web_push: 8030, notification: notification, mutable: true };
+  Object.keys(extra || {}).forEach(function (k) { message[k] = extra[k]; });
+  return JSON.stringify(message);
+}
+
 function pushPayload_(s, body, tag, badge) {
   var notification = {
     title: String(s.babyName),
@@ -806,30 +1120,54 @@ function pushPayload_(s, body, tag, badge) {
     tag: tag,
     lang: 'en-US',
   };
+  // The Push API spec has the badge beside the notification; WebKit's first examples put it inside. Both are read.
   if (badge) notification.app_badge = badge;
-  return JSON.stringify({ web_push: 8030, notification: notification });
+  return pushMessage_(notification, badge ? { app_badge: badge } : null);
 }
 
 /** Sends one message to every phone that turned notifications on. True if at least one took it. */
 function pushAll_(body, tag, badge, s) {
   var subs = pushSubs_();
   if (!subs.length) return false;
-  var payload = pushPayload_(s, body, tag, badge);
-  var ok = false;
+  return pushTo_(subs, pushPayload_(s, body, tag, badge));
+}
+
+/**
+ * Sends one message to these phones, all at once, so each extra phone adds almost nothing to the wait. True if
+ * at least one took it. Forgets phones whose push address has stopped working.
+ */
+function pushTo_(subs, payload, topic) {
+  var requests = subs.map(function (sub) { return pushRequest_(sub, payload, topic); });
+  var codes;
+  try {
+    codes = UrlFetchApp.fetchAll(requests).map(function (res, i) { return pushStatus_(res, requests[i]); });
+  } catch (err) {
+    // One push service that can't be reached fails the whole batch, so the others go one at a time.
+    Logger.log(err);
+    codes = requests.map(function (r) {
+      try {
+        return pushStatus_(UrlFetchApp.fetch(r.url, r), r);
+      } catch (e) {
+        Logger.log(e);
+        return 0;
+      }
+    });
+  }
   var gone = [];
-  subs.forEach(function (sub) {
-    var status = 0;
-    try {
-      status = sendPush_(sub, payload);
-    } catch (err) {
-      Logger.log(err);
-    }
+  var ok = false;
+  codes.forEach(function (status, i) {
     // The phone turned notifications off, or the app was removed from it.
-    if (status === 404 || status === 410) gone.push(sub.endpoint);
+    if (status === 404 || status === 410) gone.push(subs[i].endpoint);
     if (status >= 200 && status < 300) ok = true;
   });
   if (gone.length) dropPushSubs_(gone);
   return ok;
+}
+
+function pushStatus_(res, request) {
+  var code = res.getResponseCode();
+  if (code >= 300) Logger.log('Push to ' + request.url.match(/^https:\/\/[^/]+/)[0] + ' answered ' + code + ': ' + res.getContentText());
+  return code;
 }
 
 function dropPushSubs_(endpoints) {
@@ -841,7 +1179,11 @@ function dropPushSubs_(endpoints) {
 /** VAPID tokens for this run, by push service, so several phones on one service share a signature. */
 var vapidCache_ = {};
 
-function sendPush_(sub, payload) {
+/**
+ * The request that delivers `payload` to one phone, for UrlFetchApp. A `topic` makes the push service replace a
+ * message with the same topic that's still waiting for a phone that's off, so it only gets the latest.
+ */
+function pushRequest_(sub, payload, topic) {
   var keys = vapidKeys_();
   var aud = String(sub.endpoint).match(/^https:\/\/[^/]+/)[0];
   if (!vapidCache_[aud]) {
@@ -850,20 +1192,25 @@ function sendPush_(sub, payload) {
     vapidCache_[aud] = vapidJwt_(claims, b64urlDecode_(keys.privateKey));
   }
   var body = encryptPush_(utf8_(payload), b64urlDecode_(sub.p256dh), b64urlDecode_(sub.auth));
-  var res = UrlFetchApp.fetch(sub.endpoint, {
+  var headers = {
+    TTL: String(PUSH_TTL_S),
+    Urgency: 'high',
+    'Content-Encoding': 'aes128gcm',
+    Authorization: 'vapid t=' + vapidCache_[aud] + ', k=' + keys.publicKey,
+  };
+  if (topic) headers.Topic = topic;
+  return {
+    url: String(sub.endpoint),
     method: 'post',
     payload: Utilities.newBlob(signed_(body), 'application/octet-stream'),
-    headers: {
-      TTL: String(PUSH_TTL_S),
-      Urgency: 'high',
-      'Content-Encoding': 'aes128gcm',
-      Authorization: 'vapid t=' + vapidCache_[aud] + ', k=' + keys.publicKey,
-    },
+    headers: headers,
     muteHttpExceptions: true,
-  });
-  var code = res.getResponseCode();
-  if (code >= 300) Logger.log('Push to ' + aud + ' answered ' + code + ': ' + res.getContentText());
-  return code;
+  };
+}
+
+function sendPush_(sub, payload) {
+  var request = pushRequest_(sub, payload);
+  return pushStatus_(UrlFetchApp.fetch(request.url, request), request);
 }
 
 /** Menu item. Sends a test notification to every phone that turned notifications on. */
@@ -878,6 +1225,92 @@ function testPush() {
   toast_(ok
     ? 'Sent to ' + left.length + (left.length === 1 ? ' phone: ' : ' phones: ') + left.map(function (s) { return s.user + (s.device ? ' (' + s.device + ')' : ''); }).join(', ')
     : 'No phone accepted it. See Executions in the Apps Script editor for details.');
+}
+
+// ---------------------------------------------------------------------------
+// The running feed on every phone (SETUP.md, section 8)
+//
+// When a feed starts, every phone with notifications on shows it, even with the app closed. When it ends, the
+// notice is replaced with how long it went. The phone that made the change is left out: its app has done it already.
+
+/** Script property with the feed the phones were last told about, to tell what changed. */
+var FEED_NOTICE_KEY = 'feedNotice';
+/** Matches FEED_TAG in the app's src/lib/feed-notice.ts, so a newer notice replaces the one before. */
+var FEED_TAG = 'feed-running';
+
+function feedSig_(e) {
+  return e.id + '|' + e.kind + '|' + e.start;
+}
+
+/**
+ * Tells the phones about the running feed after a change to feeds. `from` is the push address of the phone that
+ * made the change, if it sent one, and `changed` the feed it changed (null after a delete or a widget). Never
+ * fails the change itself, which has been saved by now.
+ */
+function feedChanged_(from, user, changed) {
+  try {
+    var subs = pushSubs_();
+    if (!subs.length) return;
+    var props = PropertiesService.getScriptProperties();
+    // Editing a finished feed matters only while the phones are showing one.
+    if (changed && changed.end && !props.getProperty(FEED_NOTICE_KEY)) return;
+    var now = Date.now();
+    var news = withLock_(function () { return feedNews_(listEvents_(2), now, user, props); });
+    if (!news) return;
+    var to = subs.filter(function (sub) { return sub.feed !== false && sub.endpoint !== String(from || ''); });
+    if (to.length) pushTo_(to, feedPayload_(news, settingsWithDefaults_()), 'feed');
+  } catch (err) {
+    Logger.log(err);
+  }
+}
+
+/**
+ * What the phones need to hear now: { state: 'running' | 'ended' | 'removed', event }, or null if nothing changed
+ * for them. Remembers what it said, so it runs inside the lock.
+ */
+function feedNews_(events, now, user, props) {
+  var told = JSON.parse(props.getProperty(FEED_NOTICE_KEY) || 'null');
+  var running = runningFeed_(events, now);
+  if (running) {
+    if (told && told.sig === feedSig_(running)) return null;
+    props.setProperty(FEED_NOTICE_KEY, JSON.stringify({
+      id: running.id, sig: feedSig_(running), kind: running.kind, start: running.start, by: running.by,
+    }));
+    return { state: 'running', event: running };
+  }
+  if (!told) return null;
+  var last = events.filter(function (e) { return e.id === told.id; })[0];
+  // Left on for hours, so it no longer counts as running, but nobody has stopped it: the phones keep showing it.
+  if (last && !last.end) return null;
+  props.deleteProperty(FEED_NOTICE_KEY);
+  if (last) return { state: 'ended', event: last };
+  // Deleted. One from days ago that has since dropped out of the list isn't worth a notification.
+  if (now - time_(told.start) > 86400000) return null;
+  return { state: 'removed', event: told, by: user };
+}
+
+/** The message for feedNews_(). Old app versions and iOS's own display show `notification`; the app uses `feed`. */
+function feedPayload_(news, s) {
+  var e = news.event;
+  var start = time_(e.start);
+  var title;
+  var body;
+  if (news.state === 'running') {
+    title = 'Feeding · ' + label_(e);
+    body = s.babyName + ' · started ' + clock_(start) + ' by ' + e.by;
+  } else if (news.state === 'ended') {
+    var end = time_(e.end);
+    var mins = Math.max(1, Math.round((end - start) / 60000));
+    title = 'Feed stopped · ' + label_(e);
+    body = clock_(start) + ' to ' + clock_(end) + ' (' + mins + ' min), stopped by ' + (e.updatedBy || e.by) + '.';
+  } else {
+    title = 'Feed removed · ' + label_(e);
+    body = 'The feed started at ' + clock_(start) + ' was deleted by ' + news.by + '.';
+  }
+  var notification = { title: title, body: body, navigate: String(s.appUrl), tag: FEED_TAG, silent: true, lang: 'en-US' };
+  // Only what the notice needs: notes could push the message past the 4 KB a push can carry.
+  var feed = { state: news.state, baby: String(s.babyName), event: { id: e.id, type: 'feeding', kind: e.kind, start: e.start, by: e.by } };
+  return pushMessage_(notification, { feed: feed });
 }
 
 // --- Bytes. Arrays of numbers 0-255; Apps Script's own byte arrays are signed (-128 to 127).

@@ -138,10 +138,12 @@ describe("Web Push in the Sheet script", () => {
           typeof data === "string" ? Utilities.newBlob(data) : { bytes: buf(data) },
       },
       UrlFetchApp: {
-        fetch: (url: string, opts: { headers: Record<string, string>; payload: { bytes: Buffer } }) => {
-          sent.push({ url, headers: opts.headers, body: opts.payload.bytes })
-          return { getResponseCode: () => (url.includes("gone") ? 410 : 201), getContentText: () => "" }
-        },
+        // All phones at once.
+        fetchAll: (requests: { url: string; headers: Record<string, string>; payload: { bytes: Buffer } }[]) =>
+          requests.map(({ url, headers, payload }) => {
+            sent.push({ url, headers, body: payload.bytes })
+            return { getResponseCode: () => (url.includes("gone") ? 410 : 201), getContentText: () => "" }
+          }),
       },
     })
     const subscribe = (endpoint: string, phone: (typeof phones)[number]) =>
@@ -162,6 +164,8 @@ describe("Web Push in the Sheet script", () => {
     const message = JSON.parse(decrypt(sent[0].body, phones[0].getPrivateKey(), phones[0].getPublicKey(), auth))
     expect(message).toEqual({
       web_push: 8030,
+      mutable: true,
+      app_badge: 1,
       notification: {
         title: "Carolina",
         body: "Time for a diaper check.",
