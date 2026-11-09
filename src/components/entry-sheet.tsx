@@ -3,7 +3,7 @@ import { Annoyed, Frown, Laugh, Meh, Smile, Timer, Trash2, type LucideIcon } fro
 
 import { AmountInput } from "@/components/amount-input"
 import { DateTimeField } from "@/components/datetime-field"
-import { confidenceLabel } from "@/components/describe"
+import { confidenceLabel, eventTitle } from "@/components/describe"
 import { kindIcon, TYPE_ICONS } from "@/components/icons"
 import {
   AlertDialog,
@@ -35,6 +35,7 @@ import { newId } from "@/lib/api"
 import { entryErrors, type BottleMode } from "@/lib/validate"
 import { useTempUnit } from "@/hooks/use-temp-unit"
 import { formatTemp, fromDisplayTemp, isFever, toDisplayTemp } from "@/lib/temperature"
+import { formatClock } from "@/lib/time"
 import {
   DIAPER_LABELS,
   isBottle,
@@ -110,6 +111,7 @@ export function EntrySheet({
   user,
   unit,
   demo,
+  running,
 }: {
   draft: Draft | null
   onClose: () => void
@@ -119,6 +121,8 @@ export function EntrySheet({
   unit: Unit
   /** Demo entries live on this phone only, so there's no Sheet copy to mention. */
   demo?: boolean
+  /** The feed timer that's going, if any. Only one runs at a time, so it blocks starting another. */
+  running?: LogEvent
 }) {
   const [event, setEvent] = useState<LogEvent | null>(null)
   const [bottleMode, setBottleMode] = useState<BottleMode>("left")
@@ -373,11 +377,6 @@ export function EntrySheet({
                             She drank about <strong className="text-foreground">{formatAmount(drank, unit)}</strong>.
                           </FieldDescription>
                         )}
-                        {drank === undefined && event.end && (
-                          <FieldDescription>
-                            Without an amount, this bottle counts as 0 {unit} in totals.
-                          </FieldDescription>
-                        )}
                       </Field>
                     ) : (
                       <Field className="gap-3" data-vaul-no-drag>
@@ -568,11 +567,17 @@ export function EntrySheet({
                 {saving && <Spinner />}
                 {saving ? "Saving" : editing ? "Save changes" : "Save"}
               </Button>
+              {!editing && event.type === "feeding" && running && (
+                <p className="text-muted-foreground text-sm">
+                  The {eventTitle(running).toLowerCase()} feed from {formatClock(running.start)} is still running.
+                  Stop it before starting another timer.
+                </p>
+              )}
               {!editing && event.type === "feeding" && (
                 <Button
                   size="lg"
                   variant="outline"
-                  disabled={saving || timerErrors.length > 0}
+                  disabled={saving || timerErrors.length > 0 || !!running}
                   // The timer starts now, not when the drawer opened, unless a start time was picked.
                   onClick={() =>
                     submit({ end: undefined, ...(startEdited ? {} : { start: new Date().toISOString() }) })

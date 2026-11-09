@@ -1,4 +1,5 @@
-import type { Backend } from "./api"
+import { setPushEndpoint, type Backend } from "./api"
+import { feedNoticePref } from "./feed-pref"
 
 /**
  * Whether this phone can get notifications from the Sheet. iPhones only offer them to the app opened from the
@@ -64,7 +65,8 @@ const SYNC_KEY = "ct.push"
 /** How often the app re-sends its subscription, in case the Sheet dropped it or the push service changed it. */
 const RESYNC_MS = 24 * 3_600_000
 
-type SyncMark = { owner: string; at: number }
+/** When the Sheet last got this phone's subscription, and the running-feed setting it got with it. */
+type SyncMark = { owner: string; at: number; feed?: boolean }
 
 function readMark(): SyncMark | null {
   try {
@@ -94,9 +96,16 @@ async function subscribeWith(backend: Backend, owner: string) {
     sub = null
   }
   sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) })
-  const result = await backend.pushSubscribe({ ...sub.toJSON(), device: deviceName() })
-  writeMark({ owner, at: Date.now() })
+  setPushEndpoint(sub.endpoint)
+  const feed = feedNoticePref()
+  const result = await backend.pushSubscribe({ ...sub.toJSON(), device: deviceName(), feed })
+  writeMark({ owner, at: Date.now(), feed })
   return { subscription: sub, ...result }
+}
+
+/** Tells the API client this phone's push address, so changes made here say which phone made them. */
+export async function rememberPushEndpoint() {
+  setPushEndpoint((await currentSubscription())?.endpoint)
 }
 
 /**
@@ -118,6 +127,7 @@ export async function enablePush(backend: Backend, owner: string) {
 export async function disablePush(backend: Backend) {
   const sub = await currentSubscription()
   writeMark(null)
+  setPushEndpoint(undefined)
   if (!sub) return
   // Tell the Sheet first: once unsubscribed, the endpoint is gone. The Sheet also drops it on its next send.
   await backend.pushUnsubscribe(sub.endpoint).catch(() => {})
@@ -126,11 +136,13 @@ export async function disablePush(backend: Backend) {
 
 /**
  * Once a day, re-send this phone's subscription, and quietly make a new one if the phone dropped it (iOS can,
- * after an update). Only on a phone where notifications were turned on with this sign-in.
+ * after an update). Sooner if the running-feed setting changed and the Sheet hasn't heard. Only on a phone where
+ * notifications were turned on with this sign-in.
  */
 export async function resyncPush(backend: Backend, owner: string) {
   const mark = readMark()
-  if (!mark || mark.owner !== owner || Date.now() - mark.at < RESYNC_MS) return
+  if (!mark || mark.owner !== owner) return
+  if (Date.now() - mark.at < RESYNC_MS && mark.feed === feedNoticePref()) return
   if (pushSupport() !== "ok" || Notification.permission !== "granted") return
   await subscribeWith(backend, owner)
 }
