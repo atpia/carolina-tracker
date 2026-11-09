@@ -2,19 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "@/components/ui/toast"
 
 import { entryName } from "@/components/describe"
-import { createBackend, isAuthError, isNetworkError, isRetryable, type Connection } from "@/lib/api"
-import { DEFAULT_SETTINGS, type LightState, type LogEvent, type Session } from "@/lib/types"
+import { createBackend, isAuthError, isNetworkError, isRetryable, newId, type Connection } from "@/lib/api"
+import * as store from "@/lib/store"
+import { addToQueue, upsert, withQueued, without, type NewOp, type QueuedOp } from "@/lib/store"
+import { onWorkerSynced, requestBackgroundSync } from "@/lib/sw-client"
+import { flushQueue } from "@/lib/sync"
+import { DEFAULT_SETTINGS, type DiscordState, type LightState, type LogEvent, type Session } from "@/lib/types"
 
 const POLL_MS = 30_000
-const SESSION_KEY = "ct.session"
-const EVENTS_KEY = "ct.events"
-const QUEUE_KEY = "ct.queue"
 
 /** Why the last refresh failed: no connection at all, or the Sheet's side had a problem. */
 export type SyncError = { kind: "network" | "server"; message: string }
-
-/** A change that hasn't reached the Sheet yet because the phone was offline. */
-type QueuedOp = { op: "save"; event: LogEvent } | { op: "delete"; id: string }
 
 function definedOnly<T extends object>(obj: T | undefined): Partial<T> {
   if (!obj) return {}
@@ -23,47 +21,19 @@ function definedOnly<T extends object>(obj: T | undefined): Partial<T> {
   ) as Partial<T>
 }
 
-/** Stored data is tagged with the personal code it belongs to, so a different sign-in never sees it. */
-function readStored<T>(key: string, owner: string | null): T | undefined {
-  if (!owner) return undefined
-  try {
-    const raw = localStorage.getItem(key)
-    const parsed = raw ? (JSON.parse(raw) as { owner: string; value: T }) : undefined
-    return parsed?.owner === owner ? parsed.value : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function writeStored(key: string, owner: string | null, value: unknown) {
-  if (!owner) return
-  try {
-    localStorage.setItem(key, JSON.stringify({ owner, value }))
-  } catch {
-    // Storage can be full or unavailable; the app still works, just not offline.
-  }
-}
-
-/** Lay changes that are still waiting to sync over a list from the Sheet. */
-function withQueued(list: LogEvent[], queue: QueuedOp[]) {
-  let out = list
-  for (const q of queue) {
-    out = q.op === "save" ? [...out.filter((e) => e.id !== q.event.id), q.event] : out.filter((e) => e.id !== q.id)
-  }
-  return out
-}
-
 export function useTracker(conn: Connection) {
   const backend = useMemo(() => createBackend(conn), [conn])
-  // The demo keeps its own data, so only a real sign-in is cached for offline use.
+  // The demo keeps its own data, so only a real sign-in is saved for offline use.
   const owner = conn.api === "demo" ? null : conn.code
-  const queue = useRef<QueuedOp[]>(readStored<QueuedOp[]>(QUEUE_KEY, owner) ?? [])
+  // Loaded before the app first draws (main.tsx), so the last known data shows at once, even offline.
+  const [initial] = useState(() => (owner ? store.peek(owner) : undefined))
+  const queue = useRef<QueuedOp[]>(initial?.queue ?? [])
   const [queued, setQueued] = useState(queue.current.length)
-  const [session, setSession] = useState<Session | null>(() => readStored<Session>(SESSION_KEY, owner) ?? null)
+  const [session, setSession] = useState<Session | null>(initial?.session ?? null)
   const [sessionError, setSessionError] = useState<string | null>(null)
-  const [events, setEvents] = useState<LogEvent[]>(() =>
-    withQueued(readStored<LogEvent[]>(EVENTS_KEY, owner) ?? [], queue.current),
-  )
+  const [events, setEvents] = useState<LogEvent[]>(() => withQueued(initial?.events.list ?? [], queue.current))
+  /** When the list last came from the Sheet, on this phone or by the service worker. */
+  const [syncedAt, setSyncedAt] = useState<number | undefined>(initial?.events.at)
   const [days, setDays] = useState(7)
   const [loadedDays, setLoadedDays] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -72,34 +42,59 @@ export function useTracker(conn: Connection) {
   // Bumped on every save or delete, so a poll that started before one can't overwrite it.
   const mutations = useRef(0)
   const flushing = useRef(false)
+  /** How new the list on screen is, so an older saved copy read back later doesn't replace it. */
+  const shownRev = useRef(initial?.events.rev ?? initial?.events.at ?? 0)
 
-  const setQueue = useCallback(
-    (next: QueuedOp[]) => {
-      queue.current = next
-      writeStored(QUEUE_KEY, owner, next)
-      setQueued(next.length)
-    },
-    [owner],
-  )
+  const setQueue = useCallback((next: QueuedOp[]) => {
+    queue.current = next
+    setQueued(next.length)
+  }, [])
 
+  /** Keep a change for later. Saved where the service worker can send it, even after the app is closed. */
   const enqueue = useCallback(
-    (op: QueuedOp) => {
-      // A newer save of the same entry replaces the older one; a delete must still follow any save.
-      const rest =
-        op.op === "save" ? queue.current.filter((q) => q.op !== "save" || q.event.id !== op.event.id) : queue.current
-      setQueue([...rest, op])
+    async (op: NewOp) => {
+      if (!owner) return setQueue(addToQueue(queue.current, op, newId()))
+      setQueue(await store.enqueue(owner, op))
+      requestBackgroundSync()
     },
-    [setQueue],
+    [owner, setQueue],
   )
+
+  /** Lay the saved copy over what's on screen, e.g. after the service worker synced in the background. */
+  const reloadSaved = useCallback(async () => {
+    if (!owner) return
+    const seen = mutations.current
+    const saved = await store.loadOwner(owner)
+    if (pending.current > 0 || mutations.current !== seen) return
+    setQueue(saved.queue)
+    if (saved.session) setSession(saved.session)
+    const rev = saved.events.rev ?? saved.events.at ?? 0
+    if (rev < shownRev.current) return
+    shownRev.current = rev
+    setEvents(withQueued(saved.events.list, saved.queue))
+    setSyncedAt(saved.events.at)
+  }, [owner, setQueue])
+
+  // Signing in on this phone without a reload (or a slow first read) means the saved copy wasn't loaded yet.
+  useEffect(() => {
+    if (owner && !initial) reloadSaved().catch(() => {})
+  }, [owner, initial, reloadSaved])
+
+  // The service worker keeps the Sheet's address and code, to sync while the app is closed.
+  useEffect(() => {
+    store.saveConn(owner ? conn : null).catch(() => {})
+  }, [conn, owner])
+
+  useEffect(() => onWorkerSynced(() => void reloadSaved().catch(() => {})), [reloadSaved])
 
   /**
    * The Sheet stopped accepting this code, for example after its `active` cell was set to FALSE. Forget the
-   * cached sign-in so the sign-in screen shows. Queued entries stay stored under the code.
+   * saved sign-in so the sign-in screen shows. Queued entries stay saved under the code.
    */
   const onAuthError = useCallback(
     (e: unknown) => {
       if (!isAuthError(e)) return false
-      writeStored(SESSION_KEY, owner, null)
+      if (owner) store.saveSession(owner, null).catch(() => {})
       setSession(null)
       setSessionError((e as Error).message)
       return true
@@ -109,36 +104,29 @@ export function useTracker(conn: Connection) {
 
   /** Send waiting changes in order. Stops at the first one that still can't get through. */
   const flush = useCallback(async () => {
-    if (flushing.current) return
+    if (!owner || flushing.current) return
     flushing.current = true
     try {
-      while (queue.current.length) {
-        const next = queue.current[0]
-        try {
-          if (next.op === "save") await backend.save(next.event)
-          else await backend.remove(next.id)
-        } catch (e) {
-          // Offline, or the Sheet hiccuped: keep it and try again on the next poll.
-          if (isRetryable(e)) return
-          // Signed out: keep it for when this code works again.
-          if (onAuthError(e)) return
-          const what = next.op === "save" ? entryName(next.event) : "a deleted entry"
-          toast.add({ title: `Couldn't sync ${what}`, description: (e as Error).message, type: "error" })
-        }
-        mutations.current++
-        setQueue(queue.current.filter((q) => q !== next))
-      }
+      const result = await flushQueue(backend, owner, (op, e) => {
+        const what = op.op === "save" ? entryName(op.event) : "a deleted entry"
+        toast.add({ title: `Couldn't sync ${what}`, description: e.message, type: "error" })
+      })
+      if (result.sent) mutations.current++
+      if (result.status === "auth") onAuthError(result.error)
+      setQueue(await store.readQueue(owner))
+    } catch {
+      // Storage trouble: the changes stay queued and the next poll tries again.
     } finally {
       flushing.current = false
     }
-  }, [backend, setQueue, onAuthError])
+  }, [backend, owner, setQueue, onAuthError])
 
   const loadSession = useCallback(async () => {
     try {
       const s = await backend.session()
       setSession(s)
       setSessionError(null)
-      writeStored(SESSION_KEY, owner, s)
+      if (owner) store.saveSession(owner, s).catch(() => {})
     } catch (e) {
       if (!onAuthError(e)) setSessionError((e as Error).message)
     }
@@ -152,9 +140,12 @@ export function useTracker(conn: Connection) {
     try {
       const list = await backend.list(days)
       if (pending.current === 0 && mutations.current === seen) {
+        const at = Date.now()
+        shownRev.current = at
         setEvents(withQueued(list, queue.current))
-        writeStored(EVENTS_KEY, owner, list)
         setLoadedDays(days)
+        setSyncedAt(at)
+        if (owner) store.saveEvents(owner, list, at).catch(() => {})
       }
       setError(null)
     } catch (e) {
@@ -168,7 +159,7 @@ export function useTracker(conn: Connection) {
     loadSession()
   }, [loadSession])
 
-  // Keep retrying the session in the background while only a cached one (or none) is available.
+  // Keep retrying the session in the background while only a saved one (or none) is available.
   useEffect(() => {
     if (!sessionError) return
     const id = setInterval(loadSession, POLL_MS)
@@ -197,22 +188,24 @@ export function useTracker(conn: Connection) {
       let before: LogEvent | undefined
       setEvents((list) => {
         before = list.find((e) => e.id === event.id)
-        return [...list.filter((e) => e.id !== event.id), event]
+        return upsert(list, event)
       })
       pending.current++
       mutations.current++
       try {
         // Anything already waiting goes first, so changes reach the Sheet in the order they were made.
         if (queue.current.length) {
-          enqueue({ op: "save", event })
+          await enqueue({ op: "save", event })
           flush()
           return
         }
         const saved = await backend.save(event)
-        setEvents((list) => [...list.filter((e) => e.id !== saved.id), saved])
+        setEvents((list) => upsert(list, saved))
+        // Into the offline copy straight away, so it's there if the app is closed before the next poll.
+        if (owner) store.patchEvents(owner, (list) => upsert(list, saved)).catch(() => {})
       } catch (e) {
         if (isRetryable(e)) {
-          enqueue({ op: "save", event })
+          await enqueue({ op: "save", event })
           toast.add({
             title: "Saved on this phone",
             description: "It will sync when the connection is back.",
@@ -221,13 +214,13 @@ export function useTracker(conn: Connection) {
           return
         }
         if (isAuthError(e)) {
-          enqueue({ op: "save", event })
+          await enqueue({ op: "save", event })
           onAuthError(e)
           return
         }
         // Undo just this change, leaving anything saved in the meantime alone.
         setEvents((list) => {
-          const rest = list.filter((x) => x.id !== event.id)
+          const rest = without(list, event.id)
           return before ? [...rest, before] : rest
         })
         if (!quiet) toast.add({ title: "Couldn't save", description: (e as Error).message, type: "error" })
@@ -236,7 +229,7 @@ export function useTracker(conn: Connection) {
         pending.current--
       }
     },
-    [backend, enqueue, flush, onAuthError],
+    [backend, enqueue, flush, onAuthError, owner],
   )
 
   const remove = useCallback(
@@ -244,20 +237,21 @@ export function useTracker(conn: Connection) {
       let removed: LogEvent | undefined
       setEvents((list) => {
         removed = list.find((e) => e.id === id)
-        return list.filter((e) => e.id !== id)
+        return without(list, id)
       })
       pending.current++
       mutations.current++
       try {
         if (queue.current.length) {
-          enqueue({ op: "delete", id })
+          await enqueue({ op: "delete", id })
           flush()
           return
         }
         await backend.remove(id)
+        if (owner) store.patchEvents(owner, (list) => without(list, id)).catch(() => {})
       } catch (e) {
         if (isRetryable(e) || isAuthError(e)) {
-          enqueue({ op: "delete", id })
+          await enqueue({ op: "delete", id })
           onAuthError(e)
           return
         }
@@ -267,12 +261,27 @@ export function useTracker(conn: Connection) {
         pending.current--
       }
     },
-    [backend, enqueue, flush, onAuthError],
+    [backend, enqueue, flush, onAuthError, owner],
   )
 
   const lightAlert = useCallback((id: string) => backend.lightAlert(id), [backend])
   const setLight = useCallback((light: LightState) => backend.setLight(light), [backend])
   const getLight = useCallback(() => backend.getLight(), [backend])
+
+  /** Turn the Sheet's Discord messages on or off for everyone, and keep the answer for offline starts. */
+  const setDiscord = useCallback(
+    async (on: boolean): Promise<DiscordState> => {
+      const { discord } = await backend.setDiscord(on)
+      setSession((s) => {
+        if (!s) return s
+        const next = { ...s, settings: { ...s.settings, discord } }
+        if (owner) store.saveSession(owner, next).catch(() => {})
+        return next
+      })
+      return discord
+    },
+    [backend, owner],
+  )
 
   // Fill gaps from defaults so an older Sheet script without newer settings still works.
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ...definedOnly(session?.settings) }), [session])
@@ -287,6 +296,8 @@ export function useTracker(conn: Connection) {
     error,
     /** Changes saved on this phone that haven't reached the Sheet yet. */
     queued,
+    /** When the entries on screen last came from the Sheet. Undefined before the first sync on this phone. */
+    syncedAt,
     days,
     loadedDays,
     loadMore: () => setDays((d) => d + 14),
@@ -297,6 +308,7 @@ export function useTracker(conn: Connection) {
     lightAlert,
     getLight,
     setLight,
+    setDiscord,
   }
 }
 

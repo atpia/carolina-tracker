@@ -15,11 +15,12 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { HomeScreenCard } from "@/components/home-screen-card"
+import { ShortcutsCard } from "@/components/shortcuts-card"
 import { Field, FieldDescription, FieldGroup, FieldTitle } from "@/components/ui/field"
 import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { Backend } from "@/lib/api"
-import type { Settings } from "@/lib/types"
+import type { DiscordState, Settings } from "@/lib/types"
 import { setTempUnit, useTempUnit } from "@/hooks/use-temp-unit"
 import type { TempUnit } from "@/lib/temperature"
 import type { Unit } from "@/lib/units"
@@ -39,6 +40,8 @@ export function SettingsView({
   queued = 0,
   backend,
   owner,
+  api,
+  onDiscord,
 }: {
   user: string
   users: string[]
@@ -54,6 +57,10 @@ export function SettingsView({
   backend: Backend
   /** The personal code this phone signed in with. */
   owner: string
+  /** The Sheet script's address. */
+  api: string
+  /** Turns the Sheet's Discord messages on or off for everyone. */
+  onDiscord: (on: boolean) => Promise<DiscordState>
 }) {
   const tempUnit = useTempUnit()
   const unsynced = queued === 1 ? "1 entry on this phone hasn't" : `${queued} entries on this phone haven't`
@@ -130,7 +137,15 @@ export function SettingsView({
         </CardContent>
       </Card>
 
-      <HomeScreenCard backend={backend} owner={owner} demo={demo} />
+      <HomeScreenCard
+        backend={backend}
+        owner={owner}
+        demo={demo}
+        discord={settings.discord}
+        onDiscord={onDiscord}
+      />
+
+      {!demo && <ShortcutsCard api={api} code={owner} unit={unit} />}
 
       <Card>
         <CardHeader>

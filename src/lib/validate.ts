@@ -14,12 +14,13 @@ export function entryErrors(e: LogEvent, mode: BottleMode, now = Date.now()): st
   if (start > soon || (end !== undefined && end > soon)) out.push("Times can't be in the future.")
   if (end !== undefined && end < start) out.push("The finish time is before the start time.")
   if (e.type === "feeding" && isBottle(e.kind)) {
+    // In every mode the bottle's amount is kept here: what was offered, or what she drank when it's typed in.
     const offered = e.amountStartMl
     const left = mode === "left" ? e.amountEndMl : undefined
     if ((offered ?? 0) < 0 || (left ?? 0) < 0) out.push("Amounts can't be negative.")
-    else if (offered !== undefined && left !== undefined && left > offered)
-      out.push("More is left over than was offered.")
-    if (offered === undefined && left !== undefined) out.push("Add how much was offered.")
+    // A bottle without an amount leaves a gap in the daily totals, so it needs one, timer or not.
+    else if (!offered) out.push(mode === "amount" ? "Add how much she drank." : "Add how much was offered.")
+    else if (left !== undefined && left > offered) out.push("More is left over than was offered.")
   }
   if (e.type === "med" && (e.doseMg ?? 0) < 0) out.push("The dose can't be negative.")
   if (e.type === "temp") {

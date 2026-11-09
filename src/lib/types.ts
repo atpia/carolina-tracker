@@ -81,7 +81,11 @@ export interface Settings {
   lightAlert: boolean
   /** The Sheet can reach Home Assistant for the reading light switch and brightness slider. */
   lightControl: boolean
+  /** Whether the Sheet posts to Discord: "none" when it has no webhook. One switch for everyone. */
+  discord: DiscordState
 }
+
+export type DiscordState = "none" | "on" | "off"
 
 /** The Home Assistant reading light. Brightness is 1 to 100 percent. */
 export interface LightState {
@@ -109,6 +113,7 @@ export const DEFAULT_SETTINGS: Settings = {
   breastLimitMin: 15,
   lightAlert: false,
   lightControl: false,
+  discord: "none",
 }
 
 export const FEED_LABELS: Record<FeedKind, string> = {

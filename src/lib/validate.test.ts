@@ -35,4 +35,16 @@ describe("entryErrors", () => {
     expect(entryErrors(bottle({ amountStartMl: 60, amountEndMl: 80, percent: 50 }), "percent", NOW)).toEqual([])
     expect(entryErrors(bottle({ amountStartMl: -5 }), "amount", NOW)).toEqual(["Amounts can't be negative."])
   })
+
+  it("requires an amount for formula and expressed milk", () => {
+    const bottle = (kind: string, extra: Partial<LogEvent> = {}) => feed({ kind, end: at(0.5), ...extra })
+    expect(entryErrors(bottle("formula"), "left", NOW)).toEqual(["Add how much was offered."])
+    expect(entryErrors(bottle("expressed"), "percent", NOW)).toEqual(["Add how much was offered."])
+    expect(entryErrors(bottle("expressed", { amountStartMl: 0 }), "amount", NOW)).toEqual(["Add how much she drank."])
+    // A timer (no finish time yet) needs it too.
+    expect(entryErrors(bottle("formula", { end: undefined }), "left", NOW)).toEqual(["Add how much was offered."])
+    expect(entryErrors(bottle("formula", { amountStartMl: 90 }), "left", NOW)).toEqual([])
+    // Breastfeeds have no amount.
+    expect(entryErrors(feed({ end: at(0.5) }), "left", NOW)).toEqual([])
+  })
 })

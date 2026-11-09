@@ -2,7 +2,15 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 
 import type { Backend } from "@/lib/api"
 import { installState, subscribeInstall } from "@/lib/install"
-import { currentSubscription, disablePush, enablePush, pushEnabledHere, pushSupport, resyncPush } from "@/lib/push"
+import {
+  currentSubscription,
+  disablePush,
+  enablePush,
+  pushEnabledHere,
+  pushSupport,
+  rememberPushEndpoint,
+  resyncPush,
+} from "@/lib/push"
 
 export function useInstallState() {
   return useSyncExternalStore(subscribeInstall, installState)
@@ -49,12 +57,16 @@ export function usePush(backend: Backend, owner: string) {
     await backend.pushTest(sub.endpoint)
   }, [backend])
 
-  return { support, on, permission, enable, disable, test }
+  /** Tells the Sheet this phone's running-feed setting changed, if it sends this phone notifications. */
+  const sendFeedPref = useCallback(() => resyncPush(backend, owner), [backend, owner])
+
+  return { support, on, permission, enable, disable, test, sendFeedPref }
 }
 
 /** Keeps this phone's subscription fresh in the Sheet. Runs once when the app opens. */
 export function usePushResync(backend: Backend, owner: string | null) {
   useEffect(() => {
+    if (pushSupport() === "ok") rememberPushEndpoint().catch(() => {})
     if (owner) resyncPush(backend, owner).catch(() => {})
   }, [backend, owner])
 }

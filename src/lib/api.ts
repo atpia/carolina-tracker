@@ -1,4 +1,12 @@
-import { DEFAULT_SETTINGS, type Appointment, type LightState, type LogEvent, type Place, type Session } from "./types"
+import {
+  DEFAULT_SETTINGS,
+  type Appointment,
+  type DiscordState,
+  type LightState,
+  type LogEvent,
+  type Place,
+  type Session,
+} from "./types"
 import { startOfToday } from "./time"
 
 export interface Connection {
@@ -11,6 +19,11 @@ export interface Backend {
   session(): Promise<Session>
   list(days: number): Promise<LogEvent[]>
   save(event: LogEvent): Promise<LogEvent>
+  /**
+   * Stop a running feed at `end`. If another phone already stopped it, the Sheet keeps that finish time and sends
+   * the entry back as it is. Used by the notification's Stop button, which may be showing an old copy.
+   */
+  stop(event: LogEvent, end: string): Promise<LogEvent>
   remove(id: string): Promise<void>
   /** Ask the Sheet to flash the Home Assistant light for a feed past the limit. True if it did. */
   lightAlert(id: string): Promise<boolean>
@@ -26,11 +39,28 @@ export interface Backend {
   removePlace(id: string): Promise<void>
   /** The Sheet's public VAPID key, which phones need to sign up for notifications. */
   pushKey(): Promise<string>
-  /** Send this phone's push subscription to the Sheet. Says whether the Sheet's reminders are on. */
-  pushSubscribe(subscription: PushSubscriptionJSON & { device?: string }): Promise<{ reminders: boolean | null }>
+  /**
+   * Send this phone's push subscription to the Sheet, with whether it shows the running feed. Says whether the
+   * Sheet's reminders are on.
+   */
+  pushSubscribe(subscription: PushSignup): Promise<{ reminders: boolean | null }>
   pushUnsubscribe(endpoint: string): Promise<void>
   /** Ask the Sheet to send a test notification to this phone. */
   pushTest(endpoint: string): Promise<void>
+  /** Turn the Sheet's Discord messages on or off, for everyone. The webhook stays in the Sheet. */
+  setDiscord(on: boolean): Promise<{ discord: DiscordState }>
+}
+
+export type PushSignup = PushSubscriptionJSON & { device?: string; feed?: boolean }
+
+/**
+ * This phone's push address, once it has one. It goes along with changes to entries so the Sheet can leave this
+ * phone out when it tells the others about a feed: the app here has already put up its own notice.
+ */
+let thisPhone: string | undefined
+
+export function setPushEndpoint(endpoint: string | undefined) {
+  thisPhone = endpoint
 }
 
 /** A Sheet script from before appointments answers their actions with this. */
@@ -169,10 +199,20 @@ class RemoteBackend implements Backend {
     return this.call<LogEvent[]>("list", { days })
   }
   save(event: LogEvent) {
-    return this.call<LogEvent>("save", { event })
+    return this.call<LogEvent>("save", { event, from: thisPhone })
+  }
+  async stop(event: LogEvent, end: string) {
+    try {
+      // The whole entry goes along in case it was started offline and hasn't reached the Sheet yet.
+      return await this.call<LogEvent>("stop", { id: event.id, end, event: { ...event, end }, from: thisPhone })
+    } catch (e) {
+      // A Sheet script from before "stop" can still save the finish time.
+      if (isOldScriptError(e)) return this.save({ ...event, end })
+      throw e
+    }
   }
   async remove(id: string) {
-    await this.call("delete", { id })
+    await this.call("delete", { id, from: thisPhone })
   }
   lightAlert(id: string) {
     return this.call<boolean>("lightAlert", { id })
@@ -204,7 +244,7 @@ class RemoteBackend implements Backend {
   pushKey() {
     return this.call<string>("pushKey")
   }
-  pushSubscribe(subscription: PushSubscriptionJSON & { device?: string }) {
+  pushSubscribe(subscription: PushSignup) {
     return this.call<{ reminders: boolean | null }>("pushSubscribe", { subscription })
   }
   async pushUnsubscribe(endpoint: string) {
@@ -212,6 +252,9 @@ class RemoteBackend implements Backend {
   }
   async pushTest(endpoint: string) {
     await this.call("pushTest", { endpoint })
+  }
+  setDiscord(on: boolean) {
+    return this.call<{ discord: DiscordState }>("setDiscord", { on })
   }
 }
 
@@ -331,6 +374,11 @@ class DemoBackend implements Backend {
     this.write(events)
     return saved
   }
+  async stop(event: LogEvent, end: string) {
+    const current = this.read().find((e) => e.id === event.id)
+    if (current?.end) return current
+    return this.save({ ...(current ?? event), end })
+  }
   async remove(id: string) {
     this.write(this.read().filter((e) => e.id !== id))
   }
@@ -414,6 +462,10 @@ class DemoBackend implements Backend {
   }
   async pushUnsubscribe() {}
   async pushTest() {}
+  /** The demo has no Discord channel, so the switch never shows. */
+  async setDiscord(): Promise<{ discord: DiscordState }> {
+    return { discord: "none" }
+  }
 }
 
 export function createBackend(conn: Connection): Backend {
