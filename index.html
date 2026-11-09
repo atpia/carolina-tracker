@@ -43,6 +43,17 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // If the app hasn't drawn anything after 10 seconds, its files didn't load (an update that only half
+      // arrived, say). Reload once rather than leave a blank screen; the flag stops a reload loop.
+      setTimeout(function () {
+        try {
+          if (document.getElementById("root").hasChildNodes() || sessionStorage.getItem("ct.bootReload")) return
+          sessionStorage.setItem("ct.bootReload", "1")
+          location.reload()
+        } catch (e) {}
+      }, 10000)
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
